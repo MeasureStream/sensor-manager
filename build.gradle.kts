@@ -54,6 +54,6 @@ tasks.withType<Test> {
 }
 tasks.withType<BootBuildImage> {
     tasks.withType<BootBuildImage> {
-        imageName.set("christiand9699/measuremanager:${rootProject.version}")
+        imageName.set("christiand9699/sensor-manager:${rootProject.version}")
     }
 }

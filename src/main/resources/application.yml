@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: MeasureManager
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+
+
+server:
+  port: 8080
+

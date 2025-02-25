@@ -67,6 +67,7 @@ class DataInitializer(
         nodes.forEachIndexed { index: Int, node: Node ->
             node.measurementUnits = mutableSetOf()
 
+
             node.measurementUnits.add(measurementUnits[index])
             node.measurementUnits.add(measurementUnits[index+10])
         }

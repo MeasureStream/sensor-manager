@@ -7,6 +7,11 @@ spring:
 
 
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://172.20.0.22:8080/realms/measurestream
 server:
   port: 8080
 

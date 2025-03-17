@@ -45,6 +45,12 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
         }
         return cur.findAll(page).map { it.toDTO() }
     }
+
+    override fun getByNodeId(nodeId: Long): List<ControlUnitDTO> {
+        val n = nr.findById(nodeId).get()
+        return n.controlUnits.toList().map { it.toDTO() }
+    }
+
     @Transactional
     override fun create(c: ControlUnitDTO): ControlUnitDTO {
         if(cur.findByNetworkId(c.networkId) != null ) throw EntityExistsException()//Exception("CU_NetworkID : ${c.networkId} already present")

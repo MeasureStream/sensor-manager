@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.repositories
 
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
+import com.polito.tesi.measuremanager.entities.Node
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -16,5 +17,6 @@ interface MeasurementUnitRepository:JpaRepository<MeasurementUnit, Long>,PagingA
     fun findByNetworkId(networkId: Long) : MeasurementUnit?
 
     fun findAllByNetworkId(networkId: Long , pageable:Pageable): Page<MeasurementUnit>
+
 
 }

@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.controllers
 
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
+import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.services.ControlUnitService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -15,6 +16,12 @@ class ControlUnitController(
     fun get( @RequestParam networkId: Long?, @RequestParam name: String? ): List<ControlUnitDTO> {
         return cs.getAllControlUnits(networkId = networkId, name = name)
     }
+
+    @GetMapping("/nodeid/")
+    fun getByNodeId(@RequestParam(required = true) nodeId: Long ):List<ControlUnitDTO>{
+        return cs.getByNodeId(nodeId)
+    }
+
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/","")
     fun createCU(@Valid @RequestBody cu : ControlUnitDTO): ControlUnitDTO {

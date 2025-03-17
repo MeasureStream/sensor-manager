@@ -25,6 +25,11 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         return mur.findAll().map { it.toDTO() }
     }
 
+    override fun getByNodeId(nodeId:Long): List<MeasurementUnitDTO>{
+        val n = nr.findById(nodeId).get()
+        return n.measurementUnits.toList().map { it.toDTO() }
+    }
+
     override fun getAllPage(
         page: Pageable,
         networkId: Long?,

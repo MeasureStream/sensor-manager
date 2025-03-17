@@ -10,7 +10,7 @@ interface MeasurementUnitService {
     fun get(id:Long):MeasurementUnitDTO?
     fun getAll( networkId:Long?, controlUnitNId: Long?, controlUnitName:String?):List<MeasurementUnitDTO>
     fun getAllPage(page: Pageable, networkId:Long?, controlUnitNId: Long?, controlUnitName:String?): Page<MeasurementUnitDTO>
-
+    fun getByNodeId(nodeId:Long): List<MeasurementUnitDTO>
     fun create( m : MeasurementUnitDTO): MeasurementUnitDTO
     fun update(id:Long, m : MeasurementUnitDTO): MeasurementUnitDTO
     fun delete(id:Long)

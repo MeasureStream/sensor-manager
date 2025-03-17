@@ -17,6 +17,10 @@ class MeasurementUnitController(
     fun get( @RequestParam networkId: Long?, @RequestParam controlUnitName: String?, @RequestParam controlUnitNId : Long?  ): List<MeasurementUnitDTO> {
         return mus.getAll(networkId = networkId, controlUnitNId = controlUnitNId, controlUnitName = controlUnitName)
     }
+    @GetMapping("/nodeid/")
+    fun getByNodeId(@RequestParam(required = true) nodeId: Long ):List<MeasurementUnitDTO>{
+        return mus.getByNodeId(nodeId)
+    }
 
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/","")

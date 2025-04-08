@@ -12,7 +12,7 @@ spring:
       resourceserver:
         jwt:
           #issuer-uri: http://172.20.0.22:8080/realms/measurestream
-          issuer-uri: http://host.docker.internal:8090/realms/measurestream
+          issuer-uri: http://keycloak.local:8090/realms/measurestream
 server:
   port: 8080
 

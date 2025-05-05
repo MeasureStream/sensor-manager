@@ -18,14 +18,14 @@ class SecurityConfig {
         return httpSecurity
             .authorizeHttpRequests {
                 it.requestMatchers("/actuator/**").permitAll()
-                //it.anyRequest().authenticated()
-                it.anyRequest().permitAll()
+                it.anyRequest().authenticated()
+                //it.anyRequest().permitAll()
 
             }
             .oauth2ResourceServer { it.jwt {}  }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS)}
             .csrf{it.disable()}
-            .cors { it.disable() }
+            .cors {it.disable() }
             .build()
     }
     @Bean

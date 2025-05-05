@@ -15,6 +15,10 @@ class DCCServiceImpl(private val dccr: DCCRepository) : DCCService {
         TODO("Not yet implemented")
     }
 
+    override fun getpdf(id: Long): ByteArray? {
+        return dccr.findById(id).orElse(null)?.pdf
+    }
+
     override fun getAllDccs(): List<DCCDTO> {
         return dccr.findAll().map { it.toDTO() }
     }

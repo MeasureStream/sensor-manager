@@ -14,4 +14,5 @@ interface DCCService {
     fun create(dcc : DCCDTO, pdf: MultipartFile): DCCDTO
     fun update(dcc : DCCDTO, pdf: MultipartFile): DCCDTO
     fun delete(id: Long)
+    fun getpdf(id: Long): ByteArray?
 }

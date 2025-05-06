@@ -10,15 +10,16 @@ class DCC {
     @GeneratedValue(strategy = GenerationType.AUTO)
     var id: Long = 0
 
-    lateinit var scadenza: LocalDate
+    lateinit var expiration: LocalDate
 
-    @Lob
-    @Basic(fetch = FetchType.LAZY)
+    lateinit var filename: String
+
+    @Column(columnDefinition = "bytea")
     lateinit var pdf: ByteArray
-/*
+
     @OneToOne
-    @JoinColumn(name = "node_id", unique = true)
-    var node: Node? = null
-*/
+    @JoinColumn(name = "mu_id", unique = true)
+    var mu: MeasurementUnit? = null
+
 }
 

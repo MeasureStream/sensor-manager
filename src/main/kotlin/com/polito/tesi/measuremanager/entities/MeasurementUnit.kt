@@ -29,4 +29,8 @@ class MeasurementUnit {
     var controlUnit : ControlUnit? = null*/
     @ManyToOne
     var node :  Node? = null
+
+
+    @OneToOne(mappedBy = "mu", cascade = [CascadeType.ALL], orphanRemoval = true)
+    var dcc: DCC? = null
 }

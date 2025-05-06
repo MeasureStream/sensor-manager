@@ -25,6 +25,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         return mur.findAll().map { it.toDTO() }
     }
 
+    @Transactional
     override fun getByNodeId(nodeId:Long): List<MeasurementUnitDTO>{
         val n = nr.findById(nodeId).get()
         return n.measurementUnits.toList().map { it.toDTO() }
@@ -52,7 +53,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             type = m.type
             measuresUnit = m.measuresUnit
             networkId = m.networkId
-            idDcc = m.idDcc
+            idDcc = m.idDcc ?: 0
             node = n
 
         }
@@ -80,7 +81,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         val measurementUnit = mu.apply {
             type = m.type
             measuresUnit = m.measuresUnit
-            idDcc = m.idDcc
+            idDcc = m.idDcc ?: 0
         }
 
         when {

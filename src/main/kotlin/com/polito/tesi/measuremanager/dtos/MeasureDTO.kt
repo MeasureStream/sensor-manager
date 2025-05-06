@@ -23,6 +23,8 @@ data class MeasureDTO(
 
     @PositiveOrZero
     val controlUnitNId: Long
+
+
 )
 /*
 fun Measures.toDTO() = MeasureDTO(id,_value,measureUnit,time, measurementUnit.networkId, controlUnit.networkId)

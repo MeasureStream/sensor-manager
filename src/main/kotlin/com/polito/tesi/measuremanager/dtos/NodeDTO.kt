@@ -17,9 +17,11 @@ data class NodeDTO(
     val measurementUnitsId :  Set<Long>,
     @NotNull
     val location: Point,
+
+
 )
 
-fun Node.toDTO() = NodeDTO(id,name,standard, this.controlUnits.map { e-> e.id }.toSet(),this.measurementUnits.map { e-> e.id }.toSet() , this.location)
+fun Node.toDTO() = NodeDTO(id,name,standard, this.controlUnits.map { e-> e.id }.toSet(),this.measurementUnits.map { e-> e.id }.toSet() , this.location )
 
 
 

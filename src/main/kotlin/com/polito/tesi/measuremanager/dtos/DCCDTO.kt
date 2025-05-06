@@ -4,8 +4,9 @@ import java.time.LocalDate
 
 data class DCCDTO(
     val id: Long,
-    val scadenza: LocalDate,
-    val nodeId: Long? = null
+    val expiration: LocalDate,
+    val muId: Long? = null,
+    val filename: String,
 )
 
-fun DCC.toDTO() = DCCDTO(id,scadenza, nodeId = null)
+fun DCC.toDTO() = DCCDTO(id,expiration, mu?.id, filename)

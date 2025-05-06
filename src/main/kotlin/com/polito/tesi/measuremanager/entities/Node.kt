@@ -26,4 +26,6 @@ class Node {
 
     lateinit var location : Point
 
+
+
 }

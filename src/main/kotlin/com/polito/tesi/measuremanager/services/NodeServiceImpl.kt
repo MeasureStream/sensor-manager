@@ -13,6 +13,8 @@ import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
 import kotlin.jvm.optionals.getOrNull
@@ -20,25 +22,32 @@ import kotlin.jvm.optionals.getOrNull
 @Service
 class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlUnitRepository , private val mur: MeasurementUnitRepository):NodeService {
     override fun getNode(id: Long): NodeDTO {
-        return nr.findById(id).get().toDTO()
+        val userId = getCurrentUserId()
+        //return nr.findById(id).get().toDTO()
+        return nr.findNodeByIdAndOwnerId(id,userId)?.toDTO() ?: throw EntityNotFoundException("Node $id not found")
     }
 
     override fun getAllNodes( name: String?): List<NodeDTO> {
+        val userId = getCurrentUserId()
         if ( !name.isNullOrBlank() ) {
-           return nr.findAllByName( name ).map { it.toDTO() }
+           //return nr.findAllByName( name ).map { it.toDTO() }
+            return nr.findAllByNameAndOwnerId( name, userId ).map { it.toDTO() }
         }
-        return nr.findAll().map { it.toDTO() }
+        return nr.findAllByOwnerId(userId).map { it.toDTO() }
     }
 
     override fun getAllNodesPage(page: Pageable, name: String?): Page<NodeDTO> {
+        val userId = getCurrentUserId()
         if ( !name.isNullOrBlank() ) {
-            return nr.findAllByName( name , page).map { it.toDTO() }
+            //return nr.findAllByName( name , page).map { it.toDTO() }
+            return nr.findAllByNameAndOwnerId( name, userId, page ).map { it.toDTO() }
         }
-        return nr.findAll(page).map { it.toDTO() }
+        return nr.findAllByOwnerId(userId,page).map { it.toDTO() }
     }
 
     @Transactional
     override fun create(n: NodeDTO): NodeDTO {
+        val userId = getCurrentUserId()
         //if( nr.findById(n.id).isPresent ) throw EntityExistsException("Node ${n.id} already present")
         val node = Node().apply{
             name = n.name
@@ -46,6 +55,7 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
             controlUnits = mutableSetOf()
             measurementUnits = mutableSetOf()
             location = n.location
+            ownerId = userId
         }
 
         val savedNode = nr.save(node)
@@ -75,7 +85,9 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
 
     @Transactional
     override fun update(id: Long, n: NodeDTO): NodeDTO {
+        val userId = getCurrentUserId()
         val n_old = nr.findById(id).get()
+        if(n_old.ownerId != userId) throw OperationNotAllowed("You can't update a Node owned by someone else")
         val node = n_old.apply{
             name = n.name
             standard = n.standard
@@ -111,6 +123,15 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
     }
 
     override fun delete(id: Long) {
+        val userId = getCurrentUserId()
+        val node = nr.findById(id).get()
+        if(node.ownerId != userId) throw OperationNotAllowed("You can't delete a Node owned by someone else")
         nr.deleteById(id)
+    }
+
+    fun getCurrentUserId(): String {
+        val auth = SecurityContextHolder.getContext().authentication
+        val jwt = auth.principal as Jwt
+        return jwt.subject  // oppure jwt.getClaim<String>("preferred_username")
     }
 }

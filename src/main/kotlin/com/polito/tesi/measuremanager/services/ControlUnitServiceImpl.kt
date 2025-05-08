@@ -14,51 +14,65 @@ import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrNull
 @Service
 class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository ):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {
+        val userId = getCurrentUserId()
 
         networkId?.let {
-            return cur.findAllByNetworkId(it).map { e-> e.toDTO() }
+            //return cur.findAllByNetworkId(it).map { e-> e.toDTO() }
+            return cur.findAllByNetworkIdAndNode_OwnerId(it, userId).map { e-> e.toDTO() }
         }
         name?.let {
-            return cur.findAllByName(it).map { e-> e.toDTO() }
+            return cur.findAllByNameAndNode_OwnerId(it, userId).map { e-> e.toDTO() }
+            //return cur.findAllByName(it).map { e-> e.toDTO() }
         }
-        return cur.findAll().map { it.toDTO() }
+        return cur.findAllByNode_OwnerId(userId).map { it.toDTO() }
+        //return cur.findAll().map { it.toDTO() }
     }
 
     override fun getControlUnit(id: Long): ControlUnitDTO? {
-        return cur.findByIdOrNull(id)?.toDTO()
+        val userId = getCurrentUserId()
+        return cur.findByIdAndNode_OwnerId(id,userId)?.toDTO() ?: throw EntityNotFoundException("ControlUnit $id not found")
+        //return cur.findByIdOrNull(id)?.toDTO()
     }
 
 
 
     override fun getAllControlUnitsPage(page: Pageable, networkId: Long?, name: String?): Page<ControlUnitDTO> {
-
+        val userId = getCurrentUserId()
         networkId?.let {
-            return cur.findAllByNetworkId(it,page).map { e-> e.toDTO() }
+            //return cur.findAllByNetworkId(it,page).map { e-> e.toDTO() }
+            return cur.findAllByNetworkIdAndNode_OwnerId(it,userId,page).map { e-> e.toDTO() }
         }
         name?.let {
-            return cur.findAllByName(it,page).map { e-> e.toDTO() }
+            //return cur.findAllByName(it,page).map { e-> e.toDTO() }
+            return cur.findAllByNameAndNode_OwnerId(it,userId,page).map { e-> e.toDTO() }
         }
-        return cur.findAll(page).map { it.toDTO() }
+        //return cur.findAll(page).map { it.toDTO() }
+        return cur.findAllByNode_OwnerId(userId,page).map { it.toDTO() }
     }
 
     override fun getByNodeId(nodeId: Long): List<ControlUnitDTO> {
+        val userId = getCurrentUserId()
         val n = nr.findById(nodeId).get()
+        if(n.ownerId != userId) throw OperationNotAllowed("You can't get a ControlUnit owned by someone else")
         return n.controlUnits.toList().map { it.toDTO() }
     }
 
     @Transactional
     override fun create(c: ControlUnitDTO): ControlUnitDTO {
+        val userId = getCurrentUserId()
         if(cur.findByNetworkId(c.networkId) != null ) throw EntityExistsException()//Exception("CU_NetworkID : ${c.networkId} already present")
         if( c.remainingBattery > 100.0 || c.remainingBattery<0.0 ) throw OperationNotAllowed("remain battery out of range c.remainingBattery: ${c.remainingBattery}")
         if( c.nodeId != null && nr.findById(c.nodeId).isEmpty ) throw EntityNotFoundException("Node ${c.nodeId} not exists ")
 
         val n = if (c.nodeId != null ) nr.findById(c.nodeId).get() else null
-
+        if(n != null && n.ownerId != userId) throw OperationNotAllowed("You can't create a ControlUnit owned by someone else")
         val cu = ControlUnit().apply {
             networkId = c.networkId
             name = c.name
@@ -78,6 +92,7 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     }
     @Transactional
     override fun update(id: Long, c: ControlUnitDTO): ControlUnitDTO {
+        val userId = getCurrentUserId()
         if( id != c.id ) throw Exception("can't update")
         val cu = cur.findById(id).get()
         if( cu.networkId != c.networkId ) throw EntityNotFoundException()
@@ -95,6 +110,7 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
             }
             cu.node == null && c.nodeId != null -> {
                 val newNode = nr.findById(c.nodeId).get()
+                if(newNode.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 controlUnit.node = newNode
                 val newC = cur.save(controlUnit)
                 newNode.controlUnits.add(newC)
@@ -102,11 +118,13 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
                 return newC.toDTO()
             }
             cu.node != null  && c.nodeId == null -> {
+                if(cu.node!!.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 controlUnit.node = null
                 cur.save(controlUnit)
                 return cu.toDTO()
             }
             else ->{
+                if(cu.node!!.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 if (cu.node!!.id  == c.nodeId)
                     return cur.save(controlUnit).toDTO()
                 else {
@@ -153,6 +171,16 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     }
 
     override fun delete(id: Long) {
-       cur.deleteById(id)
+        val userId = getCurrentUserId()
+        val cu = cur.findById(id).get()
+        if(cu.node?.ownerId != userId) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
+        cur.deleteById(id)
     }
+
+    fun getCurrentUserId(): String {
+        val auth = SecurityContextHolder.getContext().authentication
+        val jwt = auth.principal as Jwt
+        return jwt.subject  // oppure jwt.getClaim<String>("preferred_username")
+    }
+
 }

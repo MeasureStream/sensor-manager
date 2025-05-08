@@ -11,9 +11,18 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface MeasurementUnitRepository:JpaRepository<MeasurementUnit, Long>,PagingAndSortingRepository<MeasurementUnit, Long> {
+
+    fun findByIdAndNode_OwnerId(id: Long, ownerId: String): MeasurementUnit?
+
+    fun findAllByNetworkIdAndNode_OwnerId(networkId: Long, ownerId: String) : List<MeasurementUnit>
+    fun findAllByNetworkIdAndNode_OwnerId(networkId: Long, ownerId: String, pageable:Pageable): Page<MeasurementUnit>
+
+    fun findAllByNode_OwnerId(ownerId: String) : List<MeasurementUnit>
+    fun findAllByNode_OwnerId(ownerId: String, pageable: Pageable) : Page<MeasurementUnit>
+
     fun findAllByNetworkId(networkId: Long ): List<MeasurementUnit>
 
-
+    fun findByNetworkIdAndNode_OwnerId(networkId: Long, ownerId: String) : MeasurementUnit?
     fun findByNetworkId(networkId: Long) : MeasurementUnit?
 
     fun findAllByNetworkId(networkId: Long , pageable:Pageable): Page<MeasurementUnit>

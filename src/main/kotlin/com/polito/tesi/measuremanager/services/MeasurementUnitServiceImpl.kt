@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.services
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
+import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import jakarta.persistence.EntityExistsException
@@ -11,23 +12,32 @@ import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 
 @Service
 class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository) : MeasurementUnitService {
     override fun get(id: Long): MeasurementUnitDTO? {
-        return mur.findByIdOrNull(id)?.toDTO()
+        //return mur.findByIdOrNull(id)?.toDTO()
+        val userId = getCurrentUserId()
+        return mur.findByIdAndNode_OwnerId(id,userId)?.toDTO() ?: throw EntityNotFoundException("MeasurementUnit $id not found")
     }
 
     override fun getAll(networkId: Long?, controlUnitNId: Long?, controlUnitName: String?): List<MeasurementUnitDTO> {
-        networkId?.let { return mur.findAllByNetworkId(it).map { e->e.toDTO() } }
-
-        return mur.findAll().map { it.toDTO() }
+        val userId = getCurrentUserId()
+        networkId?.let {
+            //return mur.findAllByNetworkId(it).map { e->e.toDTO()
+            return mur.findAllByNetworkIdAndNode_OwnerId(it,userId).map { e->e.toDTO() }
+            }
+        return mur.findAllByNode_OwnerId(userId).map { it.toDTO() }
+        //return mur.findAll().map { it.toDTO() }
     }
 
     @Transactional
     override fun getByNodeId(nodeId:Long): List<MeasurementUnitDTO>{
         val n = nr.findById(nodeId).get()
+        if(n.ownerId != getCurrentUserId()) throw OperationNotAllowed("You can't get a MeasurementUnit owned by someone else")
         return n.measurementUnits.toList().map { it.toDTO() }
     }
 
@@ -37,17 +47,23 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         controlUnitNId: Long?,
         controlUnitName: String?
     ): Page<MeasurementUnitDTO> {
-        networkId?.let {return mur.findAllByNetworkId(it,page).map { e->e.toDTO() }  }
+        networkId?.let {
+            //return mur.findAllByNetworkId(it,page).map { e->e.toDTO() }
+            return mur.findAllByNetworkIdAndNode_OwnerId(it,getCurrentUserId(),page).map { e->e.toDTO() }
+        }
 
-        return mur.findAll(page).map { it.toDTO() }
+        //return mur.findAll(page).map { it.toDTO() }
+        return mur.findAllByNode_OwnerId(getCurrentUserId(),page).map { it.toDTO() }
     }
     @Transactional
     override fun create(m: MeasurementUnitDTO): MeasurementUnitDTO {
+        val userId = getCurrentUserId()
 
         if( mur.findByNetworkId(m.networkId) != null ) throw EntityExistsException("MU ${m.id} already present")
         if( m.nodeId != null && nr.findById(m.nodeId).isEmpty ) throw EntityNotFoundException("Node ${m.nodeId} not exists ")
 
         val n = if (m.nodeId != null )  nr.findById(m.nodeId).get() else null
+        if(n != null && n.ownerId != userId) throw OperationNotAllowed("You can't create a MeasurementUnit owned by someone else")
 
         val measurementUnit = MeasurementUnit().apply {
             type = m.type
@@ -70,7 +86,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
     }
     @Transactional
     override fun update(id: Long, m: MeasurementUnitDTO): MeasurementUnitDTO {
-
+        val userId = getCurrentUserId()
 
         //if( id != m.id ) throw Exception("can't update")
         val mu = mur.findById(id).get()
@@ -91,6 +107,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             }
             mu.node == null && m.nodeId != null -> {
                 val newNode = nr.findById(m.nodeId).get()
+                if(newNode.ownerId != userId) throw OperationNotAllowed("You can't update a MeasurementUnit owned by someone else")
                 measurementUnit.node = newNode
                 val newC = mur.save(measurementUnit)
                 newNode.measurementUnits.add(newC)
@@ -107,6 +124,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                     return mur.save(measurementUnit).toDTO()
                 else {
                     val newNode = nr.findById(m.nodeId!!).get()
+                    if(newNode.ownerId != userId) throw OperationNotAllowed("You can't update a MeasurementUnit owned by someone else")
                     measurementUnit.node = newNode
                     val newC = mur.save(measurementUnit)
                     newNode.measurementUnits.add(newC)
@@ -148,8 +166,15 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
     }
 
     override fun delete(id: Long) {
+        val mu = mur.findById(id).get()
+        if(mu.node?.ownerId != getCurrentUserId()) throw OperationNotAllowed("You can't delete a MeasurementUnit owned by someone else")
         mur.deleteById(id)
     }
 
+    fun getCurrentUserId(): String {
+        val auth = SecurityContextHolder.getContext().authentication
+        val jwt = auth.principal as Jwt
+        return jwt.subject  // oppure jwt.getClaim<String>("preferred_username")
+    }
 
 }

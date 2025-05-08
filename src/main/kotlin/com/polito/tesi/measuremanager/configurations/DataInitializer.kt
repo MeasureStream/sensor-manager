@@ -52,6 +52,7 @@ class DataInitializer(
                 name = "Node-${it+1}"
                 standard = false
                 location = Point(Random.nextDouble(45.06,45.08), Random.nextDouble(7.5,7.6))//Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))
+                ownerId = "1d445807-c24e-4513-884d-22451ce9cf67"
             }
         }
         controlUnits.forEachIndexed { i, it ->

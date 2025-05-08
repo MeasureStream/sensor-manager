@@ -9,6 +9,15 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface ControlUnitRepository : JpaRepository<ControlUnit, Long>, PagingAndSortingRepository<ControlUnit, Long>{
+    fun findAllByNetworkIdAndNode_OwnerId(networkId: Long, ownerId: String) : List<ControlUnit>
+    fun findAllByNameAndNode_OwnerId(name:String, ownerId: String) : List<ControlUnit>
+    fun findAllByNode_OwnerId(ownerId: String) : List<ControlUnit>
+    fun findByIdAndNode_OwnerId(id: Long, ownerId: String) : ControlUnit?
+
+    fun findAllByNetworkIdAndNode_OwnerId(networkId: Long, ownerId: String,pageable:Pageable ) : Page<ControlUnit>
+    fun findAllByNameAndNode_OwnerId(name:String, ownerId: String,pageable:Pageable ) : Page<ControlUnit>
+    fun findAllByNode_OwnerId(ownerId: String,pageable:Pageable ) : Page<ControlUnit>
+
     fun findAllByNetworkId(networkId : Long ) : List<ControlUnit>
     fun findAllByName(name:String) : List<ControlUnit>
 

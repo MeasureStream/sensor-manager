@@ -4,9 +4,11 @@ package com.polito.tesi.measuremanager.configurations
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Node
+import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
+import com.polito.tesi.measuremanager.repositories.UserRepository
 import jakarta.annotation.PostConstruct
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.data.geo.Point
@@ -17,7 +19,8 @@ import kotlin.random.Random
 class DataInitializer(
     val cur: ControlUnitRepository,
     val mur: MeasurementUnitRepository,
-    val nr: NodeRepository
+    val nr: NodeRepository,
+    val ur: UserRepository
 ) : InitializingBean{
     @PostConstruct
     fun init(){
@@ -26,6 +29,19 @@ class DataInitializer(
 
     override fun afterPropertiesSet() {
 
+        val user = User().apply {
+            name="polito"
+            surname = "polito"
+            email="polito@polito.it"
+            userId = "1d445807-c24e-4513-884d-22451ce9cf67"
+            role = "customer"
+            nodes= mutableSetOf()
+            mus= mutableSetOf()
+            cus= mutableSetOf()
+        }
+        ur.save(user)
+
+
         val controlUnits = List(10) { i ->
             ControlUnit().apply {
                 networkId = (i + 1).toLong()
@@ -33,6 +49,7 @@ class DataInitializer(
                 remainingBattery = Random.nextDouble(1.0, 100.0)
                 rssi = Random.nextDouble(-100.0, 0.0)
                 node = null
+                this.user = user
             }
         }
 
@@ -41,9 +58,9 @@ class DataInitializer(
                 networkId = (i + 1).toLong()
                 type = listOf("Temperature", "Pressure", "Humidity").random()
                 measuresUnit = listOf("°C", "Pa", "%").random()
-                idDcc = (i + 137 + 1).toLong()
+                //idDcc = (i + 137 + 1).toLong()
                 node = null
-
+                this.user = user
             }
         }
 
@@ -52,7 +69,8 @@ class DataInitializer(
                 name = "Node-${it+1}"
                 standard = false
                 location = Point(Random.nextDouble(45.06,45.08), Random.nextDouble(7.5,7.6))//Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))
-                ownerId = "1d445807-c24e-4513-884d-22451ce9cf67"
+                //ownerId = "1d445807-c24e-4513-884d-22451ce9cf67"
+                this.user = user
             }
         }
         controlUnits.forEachIndexed { i, it ->
@@ -72,6 +90,10 @@ class DataInitializer(
             node.measurementUnits.add(measurementUnits[index])
             node.measurementUnits.add(measurementUnits[index+10])
         }
+
+        user.nodes.addAll(nodes)
+        user.mus.addAll(measurementUnits)
+        user.cus.addAll(controlUnits)
 
         nr.saveAll(nodes)
         cur.saveAll(controlUnits)

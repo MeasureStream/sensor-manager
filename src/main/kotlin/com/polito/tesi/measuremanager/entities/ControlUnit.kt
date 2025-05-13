@@ -27,4 +27,7 @@ class ControlUnit {
     @ManyToOne
     var node :  Node? = null
 
+    @ManyToOne
+    lateinit var user: User
+
 }

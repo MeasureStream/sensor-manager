@@ -26,7 +26,10 @@ class Node {
 
     lateinit var location : Point
 
-    @Column(nullable = false)
-    lateinit var ownerId: String  // <-- ID utente Keycloak
+    //@Column(nullable = false)
+   // lateinit var ownerId: String  // <-- ID utente Keycloak
+
+    @ManyToOne
+    lateinit var user: User
 
 }

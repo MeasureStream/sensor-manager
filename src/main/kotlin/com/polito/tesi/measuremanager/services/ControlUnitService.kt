@@ -13,4 +13,5 @@ interface ControlUnitService {
     fun create(c: ControlUnitDTO):ControlUnitDTO
     fun update(id: Long, c: ControlUnitDTO ):ControlUnitDTO
     fun delete(id: Long)
+    fun getAvailable() : List<ControlUnitDTO>
 }

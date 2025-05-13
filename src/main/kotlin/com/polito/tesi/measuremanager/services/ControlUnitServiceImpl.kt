@@ -4,10 +4,13 @@ import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
+import com.polito.tesi.measuremanager.entities.Node
+import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
+import com.polito.tesi.measuremanager.repositories.UserRepository
 import jakarta.persistence.EntityExistsException
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
@@ -17,27 +20,28 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
+import kotlin.jvm.optionals.getOrElse
 import kotlin.jvm.optionals.getOrNull
 @Service
-class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository ):ControlUnitService {
+class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository ):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {
         val userId = getCurrentUserId()
 
         networkId?.let {
             //return cur.findAllByNetworkId(it).map { e-> e.toDTO() }
-            return cur.findAllByNetworkIdAndNode_OwnerId(it, userId).map { e-> e.toDTO() }
+            return cur.findAllByNetworkIdAndUser_UserId(it, userId).map { e-> e.toDTO() }
         }
         name?.let {
-            return cur.findAllByNameAndNode_OwnerId(it, userId).map { e-> e.toDTO() }
+            return cur.findAllByNameAndUser_UserId(it, userId).map { e-> e.toDTO() }
             //return cur.findAllByName(it).map { e-> e.toDTO() }
         }
-        return cur.findAllByNode_OwnerId(userId).map { it.toDTO() }
+        return cur.findAllByUser_UserId(userId).map { it.toDTO() }
         //return cur.findAll().map { it.toDTO() }
     }
 
     override fun getControlUnit(id: Long): ControlUnitDTO? {
         val userId = getCurrentUserId()
-        return cur.findByIdAndNode_OwnerId(id,userId)?.toDTO() ?: throw EntityNotFoundException("ControlUnit $id not found")
+        return cur.findByIdAndUser_UserId(id,userId)?.toDTO() ?: throw EntityNotFoundException("ControlUnit $id not found")
         //return cur.findByIdOrNull(id)?.toDTO()
     }
 
@@ -47,40 +51,44 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
         val userId = getCurrentUserId()
         networkId?.let {
             //return cur.findAllByNetworkId(it,page).map { e-> e.toDTO() }
-            return cur.findAllByNetworkIdAndNode_OwnerId(it,userId,page).map { e-> e.toDTO() }
+            return cur.findAllByNetworkIdAndUser_UserId(it,userId,page).map { e-> e.toDTO() }
         }
         name?.let {
             //return cur.findAllByName(it,page).map { e-> e.toDTO() }
-            return cur.findAllByNameAndNode_OwnerId(it,userId,page).map { e-> e.toDTO() }
+            return cur.findAllByNameAndUser_UserId(it,userId,page).map { e-> e.toDTO() }
         }
         //return cur.findAll(page).map { it.toDTO() }
-        return cur.findAllByNode_OwnerId(userId,page).map { it.toDTO() }
+        return cur.findAllByUser_UserId(userId,page).map { it.toDTO() }
     }
 
     override fun getByNodeId(nodeId: Long): List<ControlUnitDTO> {
         val userId = getCurrentUserId()
         val n = nr.findById(nodeId).get()
-        if(n.ownerId != userId) throw OperationNotAllowed("You can't get a ControlUnit owned by someone else")
+        if(n.user.userId != userId) throw OperationNotAllowed("You can't get a ControlUnit owned by someone else")
         return n.controlUnits.toList().map { it.toDTO() }
     }
 
     @Transactional
     override fun create(c: ControlUnitDTO): ControlUnitDTO {
-        val userId = getCurrentUserId()
+        val user = getOrCreateCurrentUserId()
+
         if(cur.findByNetworkId(c.networkId) != null ) throw EntityExistsException()//Exception("CU_NetworkID : ${c.networkId} already present")
         if( c.remainingBattery > 100.0 || c.remainingBattery<0.0 ) throw OperationNotAllowed("remain battery out of range c.remainingBattery: ${c.remainingBattery}")
         if( c.nodeId != null && nr.findById(c.nodeId).isEmpty ) throw EntityNotFoundException("Node ${c.nodeId} not exists ")
 
         val n = if (c.nodeId != null ) nr.findById(c.nodeId).get() else null
-        if(n != null && n.ownerId != userId) throw OperationNotAllowed("You can't create a ControlUnit owned by someone else")
+        if(n != null && n.user.userId != user.userId) throw OperationNotAllowed("You can't create a ControlUnit owned by someone else")
         val cu = ControlUnit().apply {
             networkId = c.networkId
             name = c.name
             remainingBattery = c.remainingBattery
             rssi = c.rssi
             node = n
-
+            this.user = user
         }
+        user.cus.add(cu)
+        ur.save(user)
+
         val savedC = cur.save(cu)
         if (n != null) {
             n.controlUnits.add(savedC)
@@ -110,7 +118,7 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
             }
             cu.node == null && c.nodeId != null -> {
                 val newNode = nr.findById(c.nodeId).get()
-                if(newNode.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
+                if(newNode.user.userId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 controlUnit.node = newNode
                 val newC = cur.save(controlUnit)
                 newNode.controlUnits.add(newC)
@@ -118,13 +126,13 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
                 return newC.toDTO()
             }
             cu.node != null  && c.nodeId == null -> {
-                if(cu.node!!.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
+                if(cu.node!!.user.userId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 controlUnit.node = null
                 cur.save(controlUnit)
                 return cu.toDTO()
             }
             else ->{
-                if(cu.node!!.ownerId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
+                if(cu.node!!.user.userId != userId) throw OperationNotAllowed("You can't update a ControlUnit owned by someone else")
                 if (cu.node!!.id  == c.nodeId)
                     return cur.save(controlUnit).toDTO()
                 else {
@@ -173,14 +181,50 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     override fun delete(id: Long) {
         val userId = getCurrentUserId()
         val cu = cur.findById(id).get()
-        if(cu.node?.ownerId != userId) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
+        if( cu.user.userId != userId) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
         cur.deleteById(id)
+    }
+
+    override fun getAvailable(): List<ControlUnitDTO> {
+        val userId = getCurrentUserId()
+        return cur.findAllByNodeIsNullAndUser_UserId(userId).map { it.toDTO() }
     }
 
     fun getCurrentUserId(): String {
         val auth = SecurityContextHolder.getContext().authentication
         val jwt = auth.principal as Jwt
         return jwt.subject  // oppure jwt.getClaim<String>("preferred_username")
+    }
+
+    fun getCurrentUserInfo(): Map<String, String?> {
+        val auth = SecurityContextHolder.getContext().authentication
+        val jwt = auth.principal as Jwt
+        return mapOf(
+            "userId" to jwt.subject,
+            "email" to jwt.getClaim<String>("email"),
+            "givenName" to jwt.getClaim<String>("given_name"),
+            "familyName" to jwt.getClaim<String>("family_name"),
+            "preferredUsername" to jwt.getClaim<String>("preferred_username")
+        )
+    }
+
+    fun getOrCreateCurrentUserId(): User {
+        val userId = getCurrentUserId()
+        val user = ur.findById(userId).getOrElse { null }
+        if( user != null)
+            return user
+        val info = getCurrentUserInfo()
+        val newUser = User().apply {
+            this.userId = userId
+            name = info["givenName"] ?: ""
+            surname = info["familyName"] ?: ""
+            email = info["email"] ?: ""
+            nodes = mutableSetOf<Node>()
+            mus = mutableSetOf()
+            cus = mutableSetOf()
+        }
+
+        return ur.save(newUser)
     }
 
 }

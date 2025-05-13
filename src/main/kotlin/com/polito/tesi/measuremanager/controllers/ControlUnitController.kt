@@ -33,6 +33,12 @@ class ControlUnitController(
         return cs.update(cu.id,cu)
     }
 
+    @GetMapping("/available","/available/")
+    fun getAvailable(  ): List<ControlUnitDTO> {
+        return cs.getAvailable()
+    }
+
+
     @ResponseStatus(HttpStatus.ACCEPTED)
     @DeleteMapping("/","")
     fun deleteCU(@Valid @RequestBody cu :ControlUnitDTO){

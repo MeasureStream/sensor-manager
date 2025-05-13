@@ -21,6 +21,10 @@ class MeasurementUnitController(
     fun getByNodeId(@RequestParam(required = true) nodeId: Long ):List<MeasurementUnitDTO>{
         return mus.getByNodeId(nodeId)
     }
+    @GetMapping("/available","/available/")
+    fun getAvailable(  ): List<MeasurementUnitDTO> {
+        return mus.getAvailable()
+    }
 
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping("/","")

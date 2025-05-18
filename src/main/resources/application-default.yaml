@@ -13,6 +13,13 @@ spring:
         jwt:
           issuer-uri: http://172.20.0.22:8080/realms/measurestream
           #issuer-uri: http://keycloak.local:8090/realms/measurestream
+#logging:
+#  level:
+#    root: INFO
+#    org.springframework: DEBUG
+#    org.hibernate.SQL: DEBUG
+#    org.hibernate.type.descriptor.sql.BasicBinder: TRACE  # mostra parametri delle query
+
 server:
   port: 8080
 

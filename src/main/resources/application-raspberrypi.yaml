@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: MeasureManager
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://auth.christiandellisanti.uk/realms/measurestream
+          #issuer-uri: http://keycloak.local:8090/realms/measurestream
+#logging:
+#  level:
+#    root: INFO
+#    org.springframework: DEBUG
+#    org.hibernate.SQL: DEBUG
+#    org.hibernate.type.descriptor.sql.BasicBinder: TRACE  # mostra parametri delle query
+
+server:
+  port: 8080
+

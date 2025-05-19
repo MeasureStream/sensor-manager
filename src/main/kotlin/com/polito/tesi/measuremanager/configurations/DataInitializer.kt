@@ -33,7 +33,7 @@ class DataInitializer(
             name="polito"
             surname = "polito"
             email="polito@polito.it"
-            userId = "1d445807-c24e-4513-884d-22451ce9cf67"
+            userId = "6533c601-0db1-47a6-a150-f402cb142362"//"1d445807-c24e-4513-884d-22451ce9cf67"
             role = "customer"
             nodes= mutableSetOf()
             mus= mutableSetOf()

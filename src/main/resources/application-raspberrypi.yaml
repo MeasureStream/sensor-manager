@@ -13,6 +13,17 @@ spring:
         jwt:
           issuer-uri: https://auth.christiandellisanti.uk/realms/measurestream
           #issuer-uri: http://keycloak.local:8090/realms/measurestream
+
+  kafka:
+    bootstrap-servers: kafka:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
 #logging:
 #  level:
 #    root: INFO

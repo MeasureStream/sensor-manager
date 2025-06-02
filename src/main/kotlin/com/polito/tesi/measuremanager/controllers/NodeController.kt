@@ -4,6 +4,7 @@ import com.polito.tesi.measuremanager.dtos.NodeDTO
 import com.polito.tesi.measuremanager.services.NodeService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
+import org.springframework.security.core.Authentication
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
@@ -36,6 +37,12 @@ class NodeController ( private val ns: NodeService) {
     @GetMapping("/me", "/me/")
     fun getMe(@AuthenticationPrincipal jwt: Jwt): Map<String, Any> {
         return jwt.claims
+    }
+
+    @GetMapping("/roles", "/roles/")
+    fun getMe(authentication: Authentication): Map<String, Any> {
+        val authorities = authentication.authorities.map { it.authority }
+        return mapOf("username" to authentication.name, "roles" to authorities)
     }
 
 

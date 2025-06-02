@@ -2,10 +2,12 @@ package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
+import com.polito.tesi.measuremanager.dtos.toMUCreateDTO
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Node
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
+import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
@@ -21,7 +23,7 @@ import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
 
 @Service
-class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository, private val ur: UserRepository) : MeasurementUnitService {
+class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository, private val ur: UserRepository, private val kmu : KafkaMuProducer) : MeasurementUnitService {
 
 
     override fun get(id: Long): MeasurementUnitDTO? {
@@ -103,7 +105,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             nr.save(n)
         }
 
-
+        kmu.sendMuCreate(savedM.toMUCreateDTO())
         return savedM.toDTO()
 
     }

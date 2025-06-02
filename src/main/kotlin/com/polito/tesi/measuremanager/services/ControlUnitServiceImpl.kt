@@ -1,12 +1,14 @@
 package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
+import com.polito.tesi.measuremanager.dtos.toCuCreateDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Node
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
+import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
@@ -23,7 +25,7 @@ import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
 import kotlin.jvm.optionals.getOrNull
 @Service
-class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository ):ControlUnitService {
+class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository , private val kcu:KafkaCuProducer):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {
 
         if(isAdmin()){
@@ -124,7 +126,7 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
             nr.save(n)
         }
 
-
+        kcu.sendCuCreate(savedC.toCuCreateDTO())
         return savedC.toDTO()
     }
     @Transactional

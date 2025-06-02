@@ -22,26 +22,36 @@ import kotlin.jvm.optionals.getOrElse
 
 @Service
 class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository, private val ur: UserRepository) : MeasurementUnitService {
+
+
     override fun get(id: Long): MeasurementUnitDTO? {
-        //return mur.findByIdOrNull(id)?.toDTO()
+        if(isAdmin())
+            return mur.findByIdOrNull(id)?.toDTO()
+
         val userId = getCurrentUserId()
         return mur.findByIdAndUser_UserId(id,userId)?.toDTO() ?: throw EntityNotFoundException("MeasurementUnit $id not found")
     }
 
     override fun getAll(networkId: Long?, controlUnitNId: Long?, controlUnitName: String?): List<MeasurementUnitDTO> {
+        if(isAdmin()){
+            networkId?.let {
+                return mur.findAllByNetworkId(it).map { e -> e.toDTO() }
+            }
+                return mur.findAll().map { it.toDTO() }
+        }
         val userId = getCurrentUserId()
         networkId?.let {
-            //return mur.findAllByNetworkId(it).map { e->e.toDTO()
+
             return mur.findAllByNetworkIdAndUser_UserId(it,userId).map { e->e.toDTO() }
             }
         return mur.findAllByUser_UserId(userId).map { it.toDTO() }
-        //return mur.findAll().map { it.toDTO() }
+
     }
 
     @Transactional
     override fun getByNodeId(nodeId:Long): List<MeasurementUnitDTO>{
         val n = nr.findById(nodeId).get()
-        if(n.user.userId != getCurrentUserId()) throw OperationNotAllowed("You can't get a MeasurementUnit owned by someone else")
+        if(n.user.userId != getCurrentUserId() && !isAdmin() ) throw OperationNotAllowed("You can't get a MeasurementUnit owned by someone else")
         return n.measurementUnits.toList().map { it.toDTO() }
     }
 
@@ -51,16 +61,22 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         controlUnitNId: Long?,
         controlUnitName: String?
     ): Page<MeasurementUnitDTO> {
+        if (isAdmin()){
+            networkId?.let {
+                return mur.findAllByNetworkId(it,page).map { e->e.toDTO() }
+            }
+            return mur.findAll(page).map { it.toDTO() }
+        }
+
         networkId?.let {
-            //return mur.findAllByNetworkId(it,page).map { e->e.toDTO() }
             return mur.findAllByNetworkIdAndUser_UserId(it,getCurrentUserId(),page).map { e->e.toDTO() }
         }
 
-        //return mur.findAll(page).map { it.toDTO() }
         return mur.findAllByUser_UserId(getCurrentUserId(),page).map { it.toDTO() }
     }
     @Transactional
     override fun create(m: MeasurementUnitDTO): MeasurementUnitDTO {
+        // da riscrivere una funzione ad hoc per admin
         val user = getOrCreateCurrentUserId()
 
         if( mur.findByNetworkId(m.networkId) != null ) throw EntityExistsException("MU NetworkId ${m.networkId} already present")
@@ -93,10 +109,11 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
     }
     @Transactional
     override fun update(id: Long, m: MeasurementUnitDTO): MeasurementUnitDTO {
-        val userId = getCurrentUserId()
+        // da riscrivere una funzione ad hoc per admin
 
         //if( id != m.id ) throw Exception("can't update")
         val mu = mur.findById(id).get()
+        val userId = if(isAdmin()) mu.user.userId else getCurrentUserId()
 
         if(mu.networkId != m.networkId){
             throw  EntityNotFoundException()// questa exception è da sostituire quando il network_id non può essere mai cambiato oppure fare il controllo di non prendere il network id dall'esterno ma io non lo cambierei mai
@@ -174,11 +191,14 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
 
     override fun delete(id: Long) {
         val mu = mur.findById(id).get()
-        if( mu.user.userId != getCurrentUserId()) throw OperationNotAllowed("You can't delete a MeasurementUnit owned by someone else")
+        if( mu.user.userId != getCurrentUserId() && !isAdmin() ) throw OperationNotAllowed("You can't delete a MeasurementUnit owned by someone else")
         mur.deleteById(id)
     }
 
     override fun getAvailable(): List<MeasurementUnitDTO> {
+        if(isAdmin())
+            return mur.findAllByNodeIsNull().map { it.toDTO() }
+
         val userId = getCurrentUserId()
         return mur.findByNodeIsNullAndUser_UserId(userId).map { it.toDTO() }
     }
@@ -219,6 +239,12 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         }
 
         return ur.save(newUser)
+    }
+
+    fun isAdmin() : Boolean{
+        val auth = SecurityContextHolder.getContext().authentication
+        val isAdmin = auth.authorities.any { it.authority == "ROLE_app-admin" }
+        return isAdmin
     }
 
 }

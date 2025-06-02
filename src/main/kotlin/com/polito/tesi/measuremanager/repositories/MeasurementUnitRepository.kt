@@ -38,4 +38,6 @@ interface MeasurementUnitRepository:JpaRepository<MeasurementUnit, Long>,PagingA
 
     fun findByNodeIsNullAndUser_UserId(userId:String) : List<MeasurementUnit>
 
+    fun findAllByNodeIsNull() :List<MeasurementUnit>
+
 }

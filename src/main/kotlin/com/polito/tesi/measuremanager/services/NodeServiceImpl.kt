@@ -24,12 +24,21 @@ import kotlin.jvm.optionals.getOrNull
 @Service
 class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlUnitRepository , private val mur: MeasurementUnitRepository, private val ur:UserRepository):NodeService {
     override fun getNode(id: Long): NodeDTO {
+        if(isAdmin())
+            return nr.findById(id).getOrElse { throw EntityNotFoundException("Node $id not found") }.toDTO()
+
         val userId = getCurrentUserId()
         //return nr.findById(id).get().toDTO()
         return nr.findNodeByIdAndUser_UserId(id,userId)?.toDTO() ?: throw EntityNotFoundException("Node $id not found")
     }
 
     override fun getAllNodes( name: String?): List<NodeDTO> {
+        if(isAdmin() && name.isNullOrBlank())
+            return nr.findAll().map { it.toDTO() }
+        if(isAdmin() && !name.isNullOrBlank())
+            return nr.findAllByName(name).map { it.toDTO() }
+
+
         val userId = getCurrentUserId()
         if ( !name.isNullOrBlank() ) {
            //return nr.findAllByName( name ).map { it.toDTO() }
@@ -39,6 +48,11 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
     }
 
     override fun getAllNodesPage(page: Pageable, name: String?): Page<NodeDTO> {
+        if(isAdmin() && name.isNullOrBlank())
+            return nr.findAll(page).map { it.toDTO() }
+        if(isAdmin() && !name.isNullOrBlank())
+            return nr.findAllByName(name, page).map { it.toDTO() }
+
         val userId = getCurrentUserId()
         if ( !name.isNullOrBlank() ) {
             //return nr.findAllByName( name , page).map { it.toDTO() }
@@ -91,9 +105,10 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
 
     @Transactional
     override fun update(id: Long, n: NodeDTO): NodeDTO {
-        val userId = getCurrentUserId()
         val n_old = nr.findById(id).get()
-        if(n_old.user.userId != userId) throw OperationNotAllowed("You can't update a Node owned by someone else")
+        val userId =  if(isAdmin()) n_old.user.userId else getCurrentUserId()
+
+        if(n_old.user.userId != userId ) throw OperationNotAllowed("You can't update a Node owned by someone else")
         val node = n_old.apply{
             name = n.name
             standard = n.standard
@@ -131,7 +146,7 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
     override fun delete(id: Long) {
         val userId = getCurrentUserId()
         val node = nr.findById(id).get()
-        if(node.user.userId != userId) throw OperationNotAllowed("You can't delete a Node owned by someone else")
+        if(node.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't delete a Node owned by someone else")
         nr.deleteById(id)
     }
 
@@ -170,5 +185,11 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
         }
 
         return ur.save(newUser)
+    }
+
+    fun isAdmin() : Boolean{
+        val auth = SecurityContextHolder.getContext().authentication
+        val isAdmin = auth.authorities.any { it.authority == "ROLE_app-admin" }
+        return isAdmin
     }
 }

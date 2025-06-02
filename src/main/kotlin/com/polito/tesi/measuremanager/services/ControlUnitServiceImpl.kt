@@ -25,29 +25,57 @@ import kotlin.jvm.optionals.getOrNull
 @Service
 class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository ):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {
+
+        if(isAdmin()){
+            networkId?.let {
+                return cur.findAllByNetworkId(it).map { e-> e.toDTO() }
+
+            }
+            name?.let {
+
+                return cur.findAllByName(it).map { e-> e.toDTO() }
+            }
+            return cur.findAll().map { it.toDTO() }
+
+        }
+
         val userId = getCurrentUserId()
 
         networkId?.let {
-            //return cur.findAllByNetworkId(it).map { e-> e.toDTO() }
+
             return cur.findAllByNetworkIdAndUser_UserId(it, userId).map { e-> e.toDTO() }
         }
         name?.let {
             return cur.findAllByNameAndUser_UserId(it, userId).map { e-> e.toDTO() }
-            //return cur.findAllByName(it).map { e-> e.toDTO() }
+
         }
         return cur.findAllByUser_UserId(userId).map { it.toDTO() }
-        //return cur.findAll().map { it.toDTO() }
+
     }
 
     override fun getControlUnit(id: Long): ControlUnitDTO? {
+        if(isAdmin())
+            return cur.findByIdOrNull(id)?.toDTO()
         val userId = getCurrentUserId()
         return cur.findByIdAndUser_UserId(id,userId)?.toDTO() ?: throw EntityNotFoundException("ControlUnit $id not found")
-        //return cur.findByIdOrNull(id)?.toDTO()
+
     }
 
 
 
     override fun getAllControlUnitsPage(page: Pageable, networkId: Long?, name: String?): Page<ControlUnitDTO> {
+        if(isAdmin()){
+            networkId?.let {
+                return cur.findAllByNetworkId(it,page).map { e-> e.toDTO() }
+
+            }
+            name?.let {
+                return cur.findAllByName(it,page).map { e-> e.toDTO() }
+
+            }
+            return cur.findAll(page).map { it.toDTO() }
+
+        }
         val userId = getCurrentUserId()
         networkId?.let {
             //return cur.findAllByNetworkId(it,page).map { e-> e.toDTO() }
@@ -64,12 +92,13 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     override fun getByNodeId(nodeId: Long): List<ControlUnitDTO> {
         val userId = getCurrentUserId()
         val n = nr.findById(nodeId).get()
-        if(n.user.userId != userId) throw OperationNotAllowed("You can't get a ControlUnit owned by someone else")
+        if(n.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't get a ControlUnit owned by someone else")
         return n.controlUnits.toList().map { it.toDTO() }
     }
 
     @Transactional
     override fun create(c: ControlUnitDTO): ControlUnitDTO {
+        // da riscrivere una funzione ad hoc per admin
         val user = getOrCreateCurrentUserId()
 
         if(cur.findByNetworkId(c.networkId) != null ) throw EntityExistsException()//Exception("CU_NetworkID : ${c.networkId} already present")
@@ -100,9 +129,12 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     }
     @Transactional
     override fun update(id: Long, c: ControlUnitDTO): ControlUnitDTO {
-        val userId = getCurrentUserId()
+        // da riscrivere una funzione ad hoc per admin
+
         if( id != c.id ) throw Exception("can't update")
         val cu = cur.findById(id).get()
+        val userId = if(isAdmin()) cu.user.userId else getCurrentUserId()
+
         if( cu.networkId != c.networkId ) throw EntityNotFoundException()
 
         val controlUnit = cu.apply {
@@ -181,11 +213,13 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     override fun delete(id: Long) {
         val userId = getCurrentUserId()
         val cu = cur.findById(id).get()
-        if( cu.user.userId != userId) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
+        if( cu.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
         cur.deleteById(id)
     }
 
     override fun getAvailable(): List<ControlUnitDTO> {
+        if(isAdmin())
+            return cur.findAllByNodeIsNull().map { it.toDTO() }
         val userId = getCurrentUserId()
         return cur.findAllByNodeIsNullAndUser_UserId(userId).map { it.toDTO() }
     }
@@ -225,6 +259,12 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
         }
 
         return ur.save(newUser)
+    }
+
+    fun isAdmin() : Boolean{
+        val auth = SecurityContextHolder.getContext().authentication
+        val isAdmin = auth.authorities.any { it.authority == "ROLE_app-admin" }
+        return isAdmin
     }
 
 }

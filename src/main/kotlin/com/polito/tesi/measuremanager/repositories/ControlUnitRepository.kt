@@ -27,11 +27,13 @@ interface ControlUnitRepository : JpaRepository<ControlUnit, Long>, PagingAndSor
     //fun findAllByNameAndNode_OwnerId(name:String, ownerId: String,pageable:Pageable ) : Page<ControlUnit>
     //fun findAllByNode_OwnerId(ownerId: String,pageable:Pageable ) : Page<ControlUnit>
 
-    //fun findAllByNetworkId(networkId : Long ) : List<ControlUnit>
-    //fun findAllByName(name:String) : List<ControlUnit>
+    fun findAllByNetworkId(networkId : Long ) : List<ControlUnit>
+    fun findAllByName(name:String) : List<ControlUnit>
 
     fun findByNetworkId(networkId: Long) : ControlUnit?
     fun findAllByNodeIsNullAndUser_UserId(userId:String) : List<ControlUnit>
-    //fun findAllByNetworkId(networkId : Long, pageable:Pageable ) : Page<ControlUnit>
-    //fun findAllByName(name:String, pageable:Pageable) : Page<ControlUnit>
+    fun findAllByNetworkId(networkId : Long, pageable:Pageable ) : Page<ControlUnit>
+    fun findAllByName(name:String, pageable:Pageable) : Page<ControlUnit>
+
+    fun findAllByNodeIsNull():List<ControlUnit>
 }

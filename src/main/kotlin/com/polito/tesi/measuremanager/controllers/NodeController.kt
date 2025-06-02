@@ -4,6 +4,8 @@ import com.polito.tesi.measuremanager.dtos.NodeDTO
 import com.polito.tesi.measuremanager.services.NodeService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -29,6 +31,11 @@ class NodeController ( private val ns: NodeService) {
     @DeleteMapping("/","")
     fun deleteN(@Valid @RequestBody n : NodeDTO){
         return ns.delete(n.id)
+    }
+
+    @GetMapping("/me", "/me/")
+    fun getMe(@AuthenticationPrincipal jwt: Jwt): Map<String, Any> {
+        return jwt.claims
     }
 
 

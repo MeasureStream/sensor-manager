@@ -15,4 +15,5 @@ interface MeasurementUnitService {
     fun update(id:Long, m : MeasurementUnitDTO): MeasurementUnitDTO
     fun delete(id:Long)
     fun getAvailable():List<MeasurementUnitDTO>
+    fun getFirstAvailableNId():Long
 }

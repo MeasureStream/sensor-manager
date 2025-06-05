@@ -44,4 +44,8 @@ class ControlUnitController(
     fun deleteCU(@Valid @RequestBody cu :ControlUnitDTO){
         return cs.delete(cu.id)
     }
+    @GetMapping("/firstavailable", "/firstavailable/")
+    fun getFirstAvailableNId():Long{
+        return cs.getFirstAvailableNId()
+    }
 }

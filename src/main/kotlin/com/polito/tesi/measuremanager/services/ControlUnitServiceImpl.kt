@@ -225,7 +225,10 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
         val userId = getCurrentUserId()
         return cur.findAllByNodeIsNullAndUser_UserId(userId).map { it.toDTO() }
     }
+    override fun getFirstAvailableNId():Long{
+        return  (cur.findMaxNetworkId() ?: 0L) + 1
 
+    }
     fun getCurrentUserId(): String {
         val auth = SecurityContextHolder.getContext().authentication
         val jwt = auth.principal as Jwt

@@ -4,6 +4,7 @@ import com.polito.tesi.measuremanager.entities.ControlUnit
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.PagingAndSortingRepository
 import org.springframework.stereotype.Repository
 
@@ -36,4 +37,7 @@ interface ControlUnitRepository : JpaRepository<ControlUnit, Long>, PagingAndSor
     fun findAllByName(name:String, pageable:Pageable) : Page<ControlUnit>
 
     fun findAllByNodeIsNull():List<ControlUnit>
+
+    @Query("SELECT MAX(c.networkId) FROM ControlUnit c")
+    fun findMaxNetworkId(): Long?
 }

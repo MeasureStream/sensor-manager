@@ -205,6 +205,10 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         return mur.findByNodeIsNullAndUser_UserId(userId).map { it.toDTO() }
     }
 
+    override fun getFirstAvailableNId(): Long {
+        return  (mur.findMaxNetworkId() ?: 0L) + 1
+    }
+
     fun getCurrentUserId(): String {
         val auth = SecurityContextHolder.getContext().authentication
         val jwt = auth.principal as Jwt

@@ -43,4 +43,9 @@ class MeasurementUnitController(
     fun deleteMU( @RequestBody mu: MeasurementUnitDTO) {
         mus.delete(mu.id)
     }
+
+    @GetMapping("/firstavailable", "/firstavailable/")
+    fun getFirstAvailableNId():Long{
+        return mus.getFirstAvailableNId()
+    }
 }

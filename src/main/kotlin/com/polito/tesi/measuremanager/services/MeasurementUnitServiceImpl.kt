@@ -194,10 +194,17 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
          */
     }
 
+    @Transactional
     override fun delete(id: Long) {
         val mu = mur.findById(id).get()
         if( mu.user.userId != getCurrentUserId() && !isAdmin() ) throw OperationNotAllowed("You can't delete a MeasurementUnit owned by someone else")
+
+
+        val event = EventMU(eventType = "DELETE", mu = mu.toMUCreateDTO())
+        kmu.sendMuCreate(event)
+
         mur.deleteById(id)
+
     }
 
     override fun getAvailable(): List<MeasurementUnitDTO> {

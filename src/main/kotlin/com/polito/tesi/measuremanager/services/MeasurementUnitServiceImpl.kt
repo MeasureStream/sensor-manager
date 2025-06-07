@@ -1,5 +1,6 @@
 package com.polito.tesi.measuremanager.services
 
+import com.polito.tesi.measuremanager.dtos.EventMU
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.dtos.toMUCreateDTO
@@ -105,7 +106,9 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             nr.save(n)
         }
 
-        kmu.sendMuCreate(savedM.toMUCreateDTO())
+        val event = EventMU(eventType = "CREATE", mu = savedM.toMUCreateDTO())
+
+        kmu.sendMuCreate(event)
         return savedM.toDTO()
 
     }

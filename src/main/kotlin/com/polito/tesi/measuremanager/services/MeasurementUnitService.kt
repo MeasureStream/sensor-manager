@@ -16,4 +16,6 @@ interface MeasurementUnitService {
     fun delete(id:Long)
     fun getAvailable():List<MeasurementUnitDTO>
     fun getFirstAvailableNId():Long
+
+    fun createforUser(m:MeasurementUnitDTO, userId:String): MeasurementUnitDTO
 }

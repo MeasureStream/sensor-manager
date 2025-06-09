@@ -15,4 +15,5 @@ interface ControlUnitService {
     fun delete(id: Long)
     fun getAvailable() : List<ControlUnitDTO>
     fun getFirstAvailableNId():Long
+    fun createforUser(c: ControlUnitDTO, userId: String) : ControlUnitDTO
 }

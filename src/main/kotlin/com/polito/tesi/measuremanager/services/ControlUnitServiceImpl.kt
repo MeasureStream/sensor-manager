@@ -229,6 +229,39 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
         return  (cur.findMaxNetworkId() ?: 0L) + 1
 
     }
+
+    @Transactional
+    override fun createforUser(c: ControlUnitDTO, userId: String): ControlUnitDTO {
+        if(!isAdmin()) throw OperationNotAllowed("You must be an ADMIN")
+        val user = ur.findById(userId).get()
+        if(cur.findByNetworkId(c.networkId) != null ) throw EntityExistsException()//Exception("CU_NetworkID : ${c.networkId} already present")
+        if( c.remainingBattery > 100.0 || c.remainingBattery<0.0 ) throw OperationNotAllowed("remain battery out of range c.remainingBattery: ${c.remainingBattery}")
+        if( c.nodeId != null && nr.findById(c.nodeId).isEmpty ) throw EntityNotFoundException("Node ${c.nodeId} not exists ")
+
+        val n = if (c.nodeId != null ) nr.findById(c.nodeId).get() else null
+        //if(n != null && n.user.userId != user.userId) throw OperationNotAllowed("You can't create a ControlUnit owned by someone else")
+
+        val cu = ControlUnit().apply {
+            networkId = c.networkId
+            name = c.name
+            remainingBattery = c.remainingBattery
+            rssi = c.rssi
+            node = n
+            this.user = user
+        }
+        user.cus.add(cu)
+        ur.save(user)
+
+        val savedC = cur.save(cu)
+        if (n != null) {
+            n.controlUnits.add(savedC)
+            nr.save(n)
+        }
+
+        kcu.sendCuCreate(savedC.toCuCreateDTO())
+        return savedC.toDTO()
+    }
+
     fun getCurrentUserId(): String {
         val auth = SecurityContextHolder.getContext().authentication
         val jwt = auth.principal as Jwt

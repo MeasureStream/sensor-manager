@@ -48,4 +48,11 @@ class MeasurementUnitController(
     fun getFirstAvailableNId():Long{
         return mus.getFirstAvailableNId()
     }
+
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/admin-create","/admin-create/")
+    fun createMUforUser(@Valid @RequestBody mu:MeasurementUnitDTO, @RequestParam(required = true) userId:String):MeasurementUnitDTO{
+        //return mus.create(mu)
+        return mus.createforUser(mu, userId)
+    }
 }

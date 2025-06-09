@@ -46,5 +46,10 @@ class NodeController ( private val ns: NodeService) {
     }
 
 
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/admin-create","/admin-create/")
+    fun createNforUser(@Valid @RequestBody n : NodeDTO, @RequestParam(required = true) userId: String): NodeDTO {
+        return ns.createforUser(n,userId)
+    }
 
 }

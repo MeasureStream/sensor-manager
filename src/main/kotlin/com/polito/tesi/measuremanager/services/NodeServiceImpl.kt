@@ -15,6 +15,7 @@ import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
@@ -148,6 +149,49 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
         val node = nr.findById(id).get()
         if(node.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't delete a Node owned by someone else")
         nr.deleteById(id)
+    }
+
+
+    @Transactional
+    override fun createforUser(n: NodeDTO, userId: String): NodeDTO {
+        if(!isAdmin()) throw OperationNotAllowed("You are not an Admin")
+        val user = ur.findById(userId).get()
+        //if( nr.findById(n.id).isPresent ) throw EntityExistsException("Node ${n.id} already present")
+        val node = Node().apply{
+            name = n.name
+            standard = n.standard
+            controlUnits = mutableSetOf()
+            measurementUnits = mutableSetOf()
+            location = n.location
+            //ownerId = userId
+            this.user = user
+        }
+        user.nodes.add(node)
+
+        val savedNode = nr.save(node)
+        ur.save(user)
+
+        if(n.controlUnitsId.isNotEmpty()){
+            val controlUnits = n.controlUnitsId.map {  cur.findById(it).getOrElse { throw  NoSuchElementException() }}.toMutableSet()
+            if(controlUnits.any { it.node != null && it.node!!.id != n.id  })
+                throw OperationNotAllowed("A ControlUnit is already assigned ${controlUnits.filter { it.node != null && it.node!!.id != n.id  }}")
+            controlUnits.forEach { it.node = savedNode }
+            cur.saveAll(controlUnits)
+            node.controlUnits = controlUnits
+        }
+        if(n.measurementUnitsId.isNotEmpty()){
+            val measurementUnits = n.measurementUnitsId.map {  mur.findById(it).getOrElse { throw  NoSuchElementException() }}.toMutableSet()
+            if(measurementUnits.any { it.node != null && it.node!!.id != n.id  })
+                throw OperationNotAllowed("A MeasurementUnits is already assigned ${measurementUnits.filter { it.node != null && it.node!!.id != n.id  }}")
+            measurementUnits.forEach { it.node = savedNode }
+            mur.saveAll(measurementUnits)
+            node.measurementUnits = measurementUnits
+        }
+
+
+        return nr.save(node).toDTO()
+
+
     }
 
     fun getCurrentUserId(): String {

@@ -48,4 +48,10 @@ class ControlUnitController(
     fun getFirstAvailableNId():Long{
         return cs.getFirstAvailableNId()
     }
+
+    @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/admin-create","/admin-create/")
+    fun createCUforUser(@Valid @RequestBody cu : ControlUnitDTO, @RequestParam(required = true) userId:String): ControlUnitDTO {
+        return cs.createforUser(cu,userId)
+    }
 }

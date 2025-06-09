@@ -12,4 +12,6 @@ interface NodeService {
     fun create(c: NodeDTO): NodeDTO
     fun update(id: Long, n: NodeDTO): NodeDTO
     fun delete(id: Long)
+
+    fun createforUser(n: NodeDTO, userId: String): NodeDTO
 }

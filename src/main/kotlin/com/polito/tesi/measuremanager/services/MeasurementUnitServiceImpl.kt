@@ -21,6 +21,7 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
+import kotlin.jvm.Throws
 import kotlin.jvm.optionals.getOrElse
 
 @Service
@@ -217,6 +218,40 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
 
     override fun getFirstAvailableNId(): Long {
         return  (mur.findMaxNetworkId() ?: 0L) + 1
+    }
+
+    override fun createforUser(m: MeasurementUnitDTO, userId: String): MeasurementUnitDTO {
+        if(!isAdmin()) throw OperationNotAllowed("You must be an ADMIN")
+        val user = ur.findById(userId).get()
+
+        if( mur.findByNetworkId(m.networkId) != null ) throw EntityExistsException("MU NetworkId ${m.networkId} already present")
+        if( m.nodeId != null && nr.findById(m.nodeId).isEmpty ) throw EntityNotFoundException("Node ${m.nodeId} not exists ")
+
+        val n = if (m.nodeId != null )  nr.findById(m.nodeId).get() else null
+       // if(n != null && n.user.userId != user.userId) throw OperationNotAllowed("You can't create a MeasurementUnit owned by someone else")
+
+        val measurementUnit = MeasurementUnit().apply {
+            type = m.type
+            measuresUnit = m.measuresUnit
+            networkId = m.networkId
+            //idDcc = m.idDcc ?: 0
+            node = n
+            this.user = user
+
+        }
+        user.mus.add(measurementUnit)
+        ur.save(user)
+        val savedM = mur.save(measurementUnit)
+
+        if (n != null) {
+            n.measurementUnits.add(savedM)
+            nr.save(n)
+        }
+
+        val event = EventMU(eventType = "CREATE", mu = savedM.toMUCreateDTO())
+
+        kmu.sendMuCreate(event)
+        return savedM.toDTO()
     }
 
     fun getCurrentUserId(): String {

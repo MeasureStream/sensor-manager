@@ -9,7 +9,7 @@ interface NodeService {
     fun getAllNodes(  name: String? ):List<NodeDTO>
     fun getAllNodesPage(page: Pageable, name: String? ): Page<NodeDTO>
 
-    fun create(c: NodeDTO): NodeDTO
+    fun create(n: NodeDTO): NodeDTO
     fun update(id: Long, n: NodeDTO): NodeDTO
     fun delete(id: Long)
 

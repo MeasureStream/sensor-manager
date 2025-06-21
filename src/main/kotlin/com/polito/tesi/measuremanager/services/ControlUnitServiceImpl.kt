@@ -1,16 +1,15 @@
 package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
+import com.polito.tesi.measuremanager.dtos.EventCU
 import com.polito.tesi.measuremanager.dtos.toCuCreateDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
-import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Node
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
-import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
 import jakarta.persistence.EntityExistsException
@@ -23,7 +22,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
-import kotlin.jvm.optionals.getOrNull
 @Service
 class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository , private val kcu:KafkaCuProducer):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {
@@ -126,7 +124,9 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
             nr.save(n)
         }
 
-        kcu.sendCuCreate(savedC.toCuCreateDTO())
+        val event = EventCU(eventType = "CREATE", cu = savedC.toCuCreateDTO())
+
+        kcu.sendCuCreate(event)
         return savedC.toDTO()
     }
     @Transactional
@@ -215,8 +215,11 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
     override fun delete(id: Long) {
         val userId = getCurrentUserId()
         val cu = cur.findById(id).get()
+        val cuCreateDTO = cu.toCuCreateDTO()
         if( cu.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't delete a ControlUnit owned by someone else")
         cur.deleteById(id)
+        val event = EventCU(eventType = "DELETE", cu = cuCreateDTO)
+        kcu.sendCuCreate(event)
     }
 
     override fun getAvailable(): List<ControlUnitDTO> {
@@ -258,7 +261,8 @@ class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val
             nr.save(n)
         }
 
-        kcu.sendCuCreate(savedC.toCuCreateDTO())
+        val event = EventCU(eventType = "CREATE", cu = savedC.toCuCreateDTO())
+        kcu.sendCuCreate(event)
         return savedC.toDTO()
     }
 

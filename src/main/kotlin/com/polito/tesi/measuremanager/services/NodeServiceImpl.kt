@@ -1,7 +1,9 @@
 package com.polito.tesi.measuremanager.services
 
-import com.polito.tesi.measuremanager.dtos.EventMU
-import com.polito.tesi.measuremanager.dtos.MuCreateDTO
+
+import com.polito.tesi.measuremanager.dtos.EventNode
+
+import com.polito.tesi.measuremanager.dtos.NodeCreateDTO
 import com.polito.tesi.measuremanager.dtos.NodeDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.entities.Node
@@ -12,18 +14,16 @@ import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
-import jakarta.persistence.EntityExistsException
+
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
-import org.springframework.data.repository.findByIdOrNull
-import org.springframework.security.access.prepost.PreAuthorize
+
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
-import kotlin.jvm.optionals.getOrNull
 
 @Service
 class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlUnitRepository , private val mur: MeasurementUnitRepository, private val ur:UserRepository, private val nk: KafkaNodeProducer):NodeService {
@@ -101,8 +101,9 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
             node.measurementUnits = measurementUnits
         }
 
-        val node_ = MuCreateDTO(node.id, node.user.userId)
-        nk.sendNodeCreate(EventMU("CREATE", node_))
+        val node_ = NodeCreateDTO(node.id, node.user.userId) //MuCreateDTO(node.id, node.user.userId)
+
+        nk.sendNodeCreate(EventNode("CREATE", node_))
         return nr.save(node).toDTO()
 
 
@@ -153,8 +154,8 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
         val node = nr.findById(id).get()
         if(node.user.userId != userId && !isAdmin() ) throw OperationNotAllowed("You can't delete a Node owned by someone else")
         nr.deleteById(id)
-        val node_ = MuCreateDTO(node.id, node.user.userId)
-        nk.sendNodeCreate(EventMU("DELETE", node_))
+        val node_ = NodeCreateDTO(node.id,node.user.userId)//MuCreateDTO(node.id, node.user.userId)
+        nk.sendNodeCreate(EventNode("DELETE", node_))
     }
 
 
@@ -194,8 +195,8 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
             node.measurementUnits = measurementUnits
         }
 
-        val node_ = MuCreateDTO(node.id, node.user.userId)
-        nk.sendNodeCreate(EventMU("CREATE", node_))
+        val node_ = NodeCreateDTO(node.id, node.user.userId)
+        nk.sendNodeCreate(EventNode("CREATE", node_))
         return nr.save(node).toDTO()
 
 

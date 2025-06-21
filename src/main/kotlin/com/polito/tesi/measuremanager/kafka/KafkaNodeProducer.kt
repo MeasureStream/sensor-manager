@@ -1,16 +1,17 @@
 package com.polito.tesi.measuremanager.kafka
 
 
-import com.polito.tesi.measuremanager.dtos.EventMU
+
+import com.polito.tesi.measuremanager.dtos.EventNode
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.stereotype.Service
 
 @Service
 class KafkaNodeProducer(private val kafkaTemplate: KafkaTemplate<String, Any>) {
 
-    fun sendNodeCreate(muEventDTO: EventMU) {
+    fun sendNodeCreate(event: EventNode) {
         //kafkaTemplate.send("mu-creation", muCreateDTO)
-        kafkaTemplate.send("node-event", muEventDTO)
-        println("Sent message to Kafka topic nodes-create: $muEventDTO")
+        kafkaTemplate.send("node-event", event)
+        println("Sent message to Kafka topic nodes-event: $event")
     }
 }

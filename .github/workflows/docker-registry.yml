@@ -27,6 +27,11 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Extract version from build.gradle.kts
+        id: version
+        run: echo "VERSION=$(grep '^version' build.gradle.kts | sed -E 's/version *= *\"(.*)\"/\1/')" >> $GITHUB_OUTPUT
+
+
       - name: Build Spring Boot app
         run: ./gradlew bootJar
 
@@ -35,5 +40,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: christiand9699/sensor-manager:latest
+          tags: |
+            christiand9699/sensor-manager:latest
+            christiand9699/sensor-manager:${{ steps.version.outputs.VERSION }}
           platforms: linux/amd64,linux/arm64

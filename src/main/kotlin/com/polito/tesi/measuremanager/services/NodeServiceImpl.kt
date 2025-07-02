@@ -23,7 +23,9 @@ import org.springframework.data.domain.Pageable
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
+import kotlin.jvm.optionals.getOrDefault
 import kotlin.jvm.optionals.getOrElse
+import kotlin.jvm.optionals.getOrNull
 
 @Service
 class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlUnitRepository , private val mur: MeasurementUnitRepository, private val ur:UserRepository, private val nk: KafkaNodeProducer):NodeService {
@@ -158,11 +160,27 @@ class NodeServiceImpl ( private val nr: NodeRepository, private val cur:ControlU
         nk.sendNodeCreate(EventNode("DELETE", node_))
     }
 
-
+    //create dell'admin
     @Transactional
     override fun createforUser(n: NodeDTO, userId: String): NodeDTO {
         if(!isAdmin()) throw OperationNotAllowed("You are not an Admin")
-        val user = ur.findById(userId).get()
+        var user = ur.findById(userId).getOrNull()
+
+
+        if (user==null) {
+            val info = getCurrentUserInfo()
+            if (userId != info["userId"]) throw Exception("User does not exist")
+            val newUser = User().apply {
+                this.userId = userId
+                name = info["givenName"] ?: ""
+                surname = info["familyName"] ?: ""
+                email = info["email"] ?: ""
+                nodes = mutableSetOf<Node>()
+                mus = mutableSetOf()
+                cus = mutableSetOf()
+            }
+            user= ur.save(newUser)
+        }
         //if( nr.findById(n.id).isPresent ) throw EntityExistsException("Node ${n.id} already present")
         val node = Node().apply{
             name = n.name

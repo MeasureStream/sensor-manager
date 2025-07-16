@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.polito.tesi"
-version = "1.0.1-alpha"
+version = "1.0.2-alpha"
 
 java {
     toolchain {

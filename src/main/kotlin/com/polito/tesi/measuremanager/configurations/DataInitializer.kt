@@ -53,21 +53,45 @@ class DataInitializer(
             }
         }
 
+
         val measurementUnits = List(20) { i ->
-            MeasurementUnit().apply {
-                networkId = (i + 1).toLong()
-                type = listOf("Temperature", "Pressure", "Humidity").random()
-                measuresUnit = when (type) {
-                    "Temperature" -> "°C"
-                    "Pressure" -> "Pa"
-                    "Humidity" -> "%"
-                    else -> "unknown"
+            when(i){
+                1 -> {
+                    MeasurementUnit().apply {
+                        networkId =  1L
+                        type = "Temperature"
+                        measuresUnit = "°C"
+                        node = null
+                        this.user = user
+                    }
+
                 }
-                //measuresUnit = listOf("°C", "Pa", "%").random()
-                //idDcc = (i + 137 + 1).toLong()
-                node = null
-                this.user = user
+                11 -> {
+                    MeasurementUnit().apply {
+                        networkId =  1L
+                        type = "Pressure"
+                        measuresUnit = "Pa"
+                        node = null
+                        this.user = user
+                    }
+                }
+                else -> {
+                    MeasurementUnit().apply {
+                        networkId = (i + 1).toLong()
+                        type = listOf("Temperature", "Pressure", "Humidity").random()
+                        measuresUnit = when (type) {
+                            "Temperature" -> "°C"
+                            "Pressure" -> "Pa"
+                            "Humidity" -> "%"
+                            else -> "unknown"
+                        }
+
+                        node = null
+                        this.user = user
+                    }
+                }
             }
+
         }
 
         val nodes = MutableList(10) {

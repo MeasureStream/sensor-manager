@@ -56,7 +56,7 @@ class DataInitializer(
 
         val measurementUnits = List(20) { i ->
             when(i){
-                1 -> {
+                0 -> {
                     MeasurementUnit().apply {
                         networkId =  1L
                         type = "Temperature"
@@ -66,7 +66,7 @@ class DataInitializer(
                     }
 
                 }
-                11 -> {
+                10 -> {
                     MeasurementUnit().apply {
                         networkId =  11L
                         type = "Pressure"

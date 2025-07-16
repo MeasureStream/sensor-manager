@@ -68,7 +68,7 @@ class DataInitializer(
                 }
                 11 -> {
                     MeasurementUnit().apply {
-                        networkId =  1L
+                        networkId =  11L
                         type = "Pressure"
                         measuresUnit = "Pa"
                         node = null

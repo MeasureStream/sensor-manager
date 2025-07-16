@@ -57,7 +57,13 @@ class DataInitializer(
             MeasurementUnit().apply {
                 networkId = (i + 1).toLong()
                 type = listOf("Temperature", "Pressure", "Humidity").random()
-                measuresUnit = listOf("°C", "Pa", "%").random()
+                measuresUnit = when (type) {
+                    "Temperature" -> "°C"
+                    "Pressure" -> "Pa"
+                    "Humidity" -> "%"
+                    else -> "unknown"
+                }
+                //measuresUnit = listOf("°C", "Pa", "%").random()
                 //idDcc = (i + 137 + 1).toLong()
                 node = null
                 this.user = user

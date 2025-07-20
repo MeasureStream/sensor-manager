@@ -128,5 +128,48 @@ class DataInitializer(
         nr.saveAll(nodes)
         cur.saveAll(controlUnits)
         mur.saveAll(measurementUnits)
+
+
+        // casi particolari
+
+        val controlUnit = ControlUnit().apply {
+                networkId = 50L
+                name = "Control Unit DET Lab"
+                remainingBattery = 100.0
+                rssi = 0.0
+                node = null
+                this.user = user
+            }
+        val mesurementUnit = MeasurementUnit().apply {
+            networkId =  21
+            type = "Temperature"
+            measuresUnit = "°C"
+            node = null
+            this.user = user
+        }
+
+        val node = Node().apply{
+            name = "Lab_Misure"
+            standard = false
+            location = Point(45.06300697998612, 7.658806443214417)//Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))
+            this.user = user
+        }
+        controlUnit.node = node
+        node.controlUnits = mutableSetOf()
+        node.controlUnits.add(controlUnit)
+
+        mesurementUnit.node=node
+        node.measurementUnits=mutableSetOf()
+        node.measurementUnits.add(mesurementUnit)
+
+        user.nodes.add(node)
+        user.mus.add(mesurementUnit)
+        user.cus.add(controlUnit)
+
+
+        nr.save(node)
+        cur.save(controlUnit)
+        mur.save(mesurementUnit)
+
     }
 }

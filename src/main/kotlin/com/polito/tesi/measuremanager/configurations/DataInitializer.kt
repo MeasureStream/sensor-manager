@@ -64,7 +64,7 @@ class DataInitializer(
             }
 
         val m1 = MeasurementUnit().apply {
-                        networkId =  1L
+                        networkId =  47L
                         type = "Temperature"
                         measuresUnit = "°C"
                         node = null

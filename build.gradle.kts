@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.polito.tesi"
-version = "1.0.5-alpha"
+version = "1.1.5-alpha"
 
 java {
     toolchain {
@@ -60,3 +60,4 @@ tasks.withType<BootBuildImage> {
         imageName.set("christiand9699/sensor-manager:${rootProject.version}")
     }
 }
+

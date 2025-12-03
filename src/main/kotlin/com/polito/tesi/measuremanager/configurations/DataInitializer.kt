@@ -42,6 +42,62 @@ class DataInitializer(
         ur.save(user)
 
 
+        val user1 = User().apply {
+            name="sacla"
+            surname = "sacla"
+            email="sacla@sacla.it"
+            userId = "a8631830-c29b-40d6-811e-98dbcf488169"//"6533c601-0db1-47a6-a150-f402cb142362"//"1d445807-c24e-4513-884d-22451ce9cf67"
+            role = "customer"
+            nodes= mutableSetOf()
+            mus= mutableSetOf()
+            cus= mutableSetOf()
+        }
+        ur.save(user1)
+
+        val c1 = ControlUnit().apply {
+                networkId = (47).toLong()
+                name = "ControlUnit-${47}"
+                remainingBattery = Random.nextDouble(1.0, 100.0)
+                rssi = Random.nextDouble(-100.0, 0.0)
+                node = null
+                this.user = user1
+            }
+
+        val m1 = MeasurementUnit().apply {
+                        networkId =  1L
+                        type = "Temperature"
+                        measuresUnit = "°C"
+                        node = null
+                        this.user = user1
+                    }
+
+                    val n1 =  Node().apply{
+                name = "Node-47"
+                standard = false
+                location = Point(Random.nextDouble(45.06,45.08), Random.nextDouble(7.5,7.6))//Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))
+                //ownerId = "1d445807-c24e-4513-884d-22451ce9cf67"
+                this.user = user1
+            }
+            c1.node = n1
+            n1.controlUnits = mutableSetOf()
+            n1.controlUnits.add(c1)
+
+            m1.node = n1
+            n1.measurementUnits = mutableSetOf()
+            n1.measurementUnits.add(m1)
+
+            user1.nodes.add(n1)
+            user1.mus.add(m1)
+            user1.cus.add(c1)
+
+            nr.save(n1)
+            cur.save(c1)
+            mur.save(m1)
+
+
+
+
+
         val controlUnits = List(10) { i ->
             ControlUnit().apply {
                 networkId = (i + 1).toLong()

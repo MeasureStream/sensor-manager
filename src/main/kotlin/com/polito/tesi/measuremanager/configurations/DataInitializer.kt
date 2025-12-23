@@ -11,10 +11,12 @@ import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
 import jakarta.annotation.PostConstruct
 import org.springframework.beans.factory.InitializingBean
+import org.springframework.context.annotation.Profile
 import org.springframework.data.geo.Point
 import org.springframework.stereotype.Component
 import kotlin.random.Random
 
+@Profile("dev")
 @Component
 class DataInitializer(
     val cur: ControlUnitRepository,

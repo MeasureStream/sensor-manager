@@ -3,9 +3,7 @@ spring:
     name: MeasureManager
   jpa:
     hibernate:
-      ddl-auto: create-drop
-
-
+      ddl-auto: validate
 
   security:
     oauth2:
@@ -22,4 +20,3 @@ spring:
 
 server:
   port: 8080
-

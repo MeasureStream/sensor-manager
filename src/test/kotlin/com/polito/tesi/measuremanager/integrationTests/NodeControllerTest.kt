@@ -83,7 +83,6 @@ internal class NodeControllerTest @Autowired constructor(val mockMvc: MockMvc){
             networkId = it.toLong() + 201,
             type = listOf("Temperature", "Pressure", "Humidity").random(),
             measuresUnit = listOf("°C", "Pa", "%").random(),
-            idDcc = it.toLong() + 137,
             nodeId = (it%10).toLong() + 1
         )
     }
@@ -265,14 +264,14 @@ internal class NodeControllerTest @Autowired constructor(val mockMvc: MockMvc){
 
     @Test
     fun `Add a MeasurementUnit Already Assigned to a Node`() {
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, 2), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 2), status().isAccepted )
         update_Node(NodeDTO(9,"node-10",false, controlUnitsId = setOf(8), measurementUnitsId = setOf(8,1),Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))),
             status().isConflict
         )
     }
     @Test
     fun `Add a MeasurementUnit not Already Assigned to a Node`() {
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, null), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", null), status().isAccepted )
         mockMvc.get("${nodeUrl}/?id=5").andExpect { jsonPath("$").isArray }.andDo { print() }.andReturn();
         update_Node(NodeDTO(5,"node-10",false, controlUnitsId = setOf(5), measurementUnitsId = setOf( 5, 15, 1),Point(Random.nextDouble(-180.0, 180.0), Random.nextDouble(-90.0, 90.0))),
             status().isAccepted

@@ -14,15 +14,9 @@ data class MeasurementUnitDTO(
     val type:String,
     @NotBlank
     val measuresUnit:String,
-    @PositiveOrZero
-    val idDcc: Long?,
     //val controlUnitNId: Long?,
 
     val nodeId : Long?,
-
-    val dccFileNme : String? = null,
-
-    val expiration: LocalDate? = null,
 )
 
-fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,type,measuresUnit, dcc?.id , node?.id, dcc?.filename, dcc?.expiration)
+fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,type,measuresUnit, node?.id)

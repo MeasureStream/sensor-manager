@@ -93,7 +93,6 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             type = m.type
             measuresUnit = m.measuresUnit
             networkId = m.networkId
-            //idDcc = m.idDcc ?: 0
             node = n
             this.user = user
 
@@ -127,7 +126,6 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         val measurementUnit = mu.apply {
             type = m.type
             measuresUnit = m.measuresUnit
-            //idDcc = m.idDcc ?: 0
         }
 
         when {
@@ -163,36 +161,6 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                 }
 
             }
-        }
-
-        /*
-        if(m.nodeId == mu.node.id){
-            val measurementUnit = mu.apply {
-                type = m.type
-                measuresUnit = m.measuresUnit
-                idDcc = m.idDcc
-            }
-            mur.save(measurementUnit)
-            return measurementUnit.toDTO()
-        }
-
-        val newNode = nr.findById(m.nodeId).get()
-        val measurementUnit = mu.apply {
-            type = m.type
-            measuresUnit = m.measuresUnit
-            networkId = m.networkId
-            idDcc = m.idDcc
-            node = newNode
-
-        }
-        mu.node.measurementUnits.remove(mu)
-        nr.save(mu.node)
-        val newM = mur.save(measurementUnit)
-        newNode.measurementUnits.add(newM)
-        nr.save(newNode)
-        return newM.toDTO()
-
-         */
     }
 
     @Transactional
@@ -234,7 +202,6 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             type = m.type
             measuresUnit = m.measuresUnit
             networkId = m.networkId
-            //idDcc = m.idDcc ?: 0
             node = n
             this.user = user
 

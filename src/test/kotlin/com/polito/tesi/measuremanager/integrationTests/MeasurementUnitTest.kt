@@ -57,7 +57,6 @@ internal class MeasurementUnitTest @Autowired constructor(val mockMvc: MockMvc){
             networkId = it.toLong() + 201,
             type = listOf("Temperature", "Pressure", "Humidity").random(),
             measuresUnit = listOf("°C", "Pa", "%").random(),
-            idDcc = it.toLong() + 137,
             nodeId = (it%10).toLong() + 1
         )
     }
@@ -173,71 +172,62 @@ internal class MeasurementUnitTest @Autowired constructor(val mockMvc: MockMvc){
     }
     @Test
     fun insert_measurement_unit_alreadyIdPresent(){
-        upload_MU( MeasurementUnitDTO(1, 301, "Pressure", "Percentage", 830, 10), status().isCreated )
+        upload_MU( MeasurementUnitDTO(1, 301, "Pressure", "Percentage", 10), status().isCreated )
     }
     @Test
     fun insert_measurement_unit_alreadyNIdPresent(){
-        upload_MU( MeasurementUnitDTO(201, 201, "Pressure", "Percentage", 830, 10), status().isConflict )
-    }
-    @Test
-    fun insert_measurement_unit_idcc_negative(){
-        upload_MU( MeasurementUnitDTO(475, 475, "Pressure", "Percentage", -830, 10), status().isConflict )
+        upload_MU( MeasurementUnitDTO(201, 201, "Pressure", "Percentage", 10), status().isConflict )
     }
     @Test
     fun insert_measurement_unit_BlankType(){
-        upload_MU( MeasurementUnitDTO(500, 500, "   ", "Percentage", 830, 10), status().isConflict )
+        upload_MU( MeasurementUnitDTO(500, 500, "   ", "Percentage", 10), status().isConflict )
 
     }
     @Test
     fun insert_measurement_unit_BlankMeasuresUnit(){
-        upload_MU( MeasurementUnitDTO(5011, 50011, "AAAA", " ", 830, 10), status().isConflict )
+        upload_MU( MeasurementUnitDTO(5011, 50011, "AAAA", " ", 10), status().isConflict )
 
     }
 
     @Test
     fun update_measurement_unit_alreadyIdPresent(){
-        update_MU(  MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, 10), status().isAccepted )
+        update_MU(  MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 10), status().isAccepted )
     }
     @Test
     fun update_measurement_unit_alreadyNIdNotPresent(){
-        update_MU(  MeasurementUnitDTO(4, 500, "Temperature", "Percentage", 830, 10), status().isNotFound )
+        update_MU(  MeasurementUnitDTO(4, 500, "Temperature", "Percentage", 10), status().isNotFound )
     }
     @Test
     fun update_measurement_unit_BlankType(){
-        update_MU( MeasurementUnitDTO(1, 201, "   ", "Percentage", 830, 10), status().isConflict )
+        update_MU( MeasurementUnitDTO(1, 201, "   ", "Percentage", 10), status().isConflict )
     }
     @Test
     fun update_measurement_unit_BlankMeasuresUnit(){
-        update_MU( MeasurementUnitDTO(1, 201, "AAA", "", 830, 10), status().isConflict )
-
-    }
-    @Test
-    fun update_measurement_unit_idDccNegative(){
-        update_MU( MeasurementUnitDTO(1, 201, "AAA", "", -830, 10), status().isConflict )
+        update_MU( MeasurementUnitDTO(1, 201, "AAA", "", 10), status().isConflict )
 
     }
 
     @Test
     fun update_measurement_change_Node(){
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, 8), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 8), status().isAccepted )
 
     }
     @Test
     fun update_measurement_change_Node_NotNullToNull(){
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, 8), status().isAccepted )
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, null), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 8), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", null), status().isAccepted )
     }
     @Test
     fun update_measurement_change_Node_NullToNotNull(){
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, null), status().isAccepted )
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, 8), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", null), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 8), status().isAccepted )
 
     }
 
     @Test
     fun update_measurement_change_Node_NullToNull(){
-        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", 831, null), status().isAccepted )
-        update_MU( MeasurementUnitDTO(1, 201, "Pressure", "Percentage", 831, null), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Temperature", "Percentage", null), status().isAccepted )
+        update_MU( MeasurementUnitDTO(1, 201, "Pressure", "Percentage", null), status().isAccepted )
 
     }
 
@@ -256,7 +246,7 @@ internal class MeasurementUnitTest @Autowired constructor(val mockMvc: MockMvc){
         val length_before = list_measurementUnitsNode.size()
 
 
-        delete_MU( MeasurementUnitDTO(19, 219, "Temperature", "Percentage", 837, 9), status().isAccepted )
+        delete_MU( MeasurementUnitDTO(19, 219, "Temperature", "Percentage", 9), status().isAccepted )
 
         val response1 = mockMvc.get("${nodeUrl}/?id=${9}").andExpect { jsonPath("$").isArray }.andDo { print() }.andReturn();
         val json1 = JSONArray(response.response.contentAsString);

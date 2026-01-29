@@ -30,6 +30,11 @@ class DataInitializer(
     }
 
     override fun afterPropertiesSet() {
+        // Check if data already exists to avoid duplicate key violations
+        if (ur.count() > 0) {
+            println("Data already initialized, skipping...")
+            return
+        }
 
         val user = User().apply {
             name="polito"

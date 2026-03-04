@@ -4,9 +4,7 @@ import com.polito.tesi.measuremanager.dtos.EventMU
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.dtos.toDTO
 import com.polito.tesi.measuremanager.dtos.toMUCreateDTO
-import com.polito.tesi.measuremanager.entities.MeasurementUnit
-import com.polito.tesi.measuremanager.entities.Node
-import com.polito.tesi.measuremanager.entities.User
+import com.polito.tesi.measuremanager.entities.*
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
@@ -83,20 +81,34 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         // da riscrivere una funzione ad hoc per admin
         val user = getOrCreateCurrentUserId()
 
+        if(m.model != 1 ){
+            throw OperationNotAllowed("Today only the model 1 is implemented")
+        }
+
         if( mur.findByNetworkId(m.networkId) != null ) throw EntityExistsException("MU NetworkId ${m.networkId} already present")
         if( m.nodeId != null && nr.findById(m.nodeId).isEmpty ) throw EntityNotFoundException("Node ${m.nodeId} not exists ")
 
         val n = if (m.nodeId != null )  nr.findById(m.nodeId).get() else null
         if(n != null && n.user.userId != user.userId) throw OperationNotAllowed("You can't create a MeasurementUnit owned by someone else")
 
-        val measurementUnit = MeasurementUnit().apply {
-            type = m.type
-            measuresUnit = m.measuresUnit
+        var measurementUnit = MeasurementUnit().apply {
             networkId = m.networkId
             node = n
             this.user = user
-
+            model = m.model
         }
+
+        if (m.model == 1) {
+            val defaultSensors = listOf(
+                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
+                PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
+                HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
+                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
+
+            )
+            measurementUnit.sensors.addAll(defaultSensors)
+        }
+
         user.mus.add(measurementUnit)
         ur.save(user)
         val savedM = mur.save(measurementUnit)
@@ -115,7 +127,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
     @Transactional
     override fun update(id: Long, m: MeasurementUnitDTO): MeasurementUnitDTO {
         // da riscrivere una funzione ad hoc per admin
-
+        //TODO("Questa funzione è tutta da rifare perché non va bene")
         //if( id != m.id ) throw Exception("can't update")
         val mu = mur.findById(id).get()
         val userId = if(isAdmin()) mu.user.userId else getCurrentUserId()
@@ -124,8 +136,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
             throw  EntityNotFoundException()// questa exception è da sostituire quando il network_id non può essere mai cambiato oppure fare il controllo di non prendere il network id dall'esterno ma io non lo cambierei mai
         }
         val measurementUnit = mu.apply {
-            type = m.type
-            measuresUnit = m.measuresUnit
+
         }
 
         when {
@@ -161,7 +172,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                 }
 
             }
-    }
+    }}
 
     @Transactional
     override fun delete(id: Long) {
@@ -199,8 +210,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
        // if(n != null && n.user.userId != user.userId) throw OperationNotAllowed("You can't create a MeasurementUnit owned by someone else")
 
         val measurementUnit = MeasurementUnit().apply {
-            type = m.type
-            measuresUnit = m.measuresUnit
+
             networkId = m.networkId
             node = n
             this.user = user

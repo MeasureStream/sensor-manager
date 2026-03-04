@@ -22,6 +22,7 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
 import kotlin.jvm.optionals.getOrElse
+
 @Service
 class ControlUnitServiceImpl(private val cur: ControlUnitRepository, private val nr: NodeRepository, private val ur: UserRepository , private val kcu:KafkaCuProducer):ControlUnitService {
     override fun getAllControlUnits(networkId: Long?, name: String?): List<ControlUnitDTO> {

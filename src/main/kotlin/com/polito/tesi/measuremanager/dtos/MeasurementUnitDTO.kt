@@ -6,17 +6,16 @@ import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.PositiveOrZero
 import java.time.LocalDate
 
+// This DTO is used to communicate between frontend and backend
 data class MeasurementUnitDTO(
     val id :Long,
     @NotEmpty
     val networkId: Long,
     @NotBlank
-    val type:String,
-    @NotBlank
-    val measuresUnit:String,
-    //val controlUnitNId: Long?,
+    val model:Int,
 
     val nodeId : Long?,
+    val sensors: List<SensorDTO> = emptyList()
 )
 
-fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,type,measuresUnit, node?.id)
+fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,model,node?.id, sensors = sensors.map { it.toDTO() })

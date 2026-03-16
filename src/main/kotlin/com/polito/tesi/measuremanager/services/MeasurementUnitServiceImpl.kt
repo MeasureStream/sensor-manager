@@ -284,6 +284,15 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                 )
             measurementUnit.sensors.addAll(defaultSensors)
         }
+
+        if (model == 100) {
+            val defaultSensors = listOf(
+                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
+                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 2},
+
+                )
+            measurementUnit.sensors.addAll(defaultSensors)
+        }
         return measurementUnit
     }
 

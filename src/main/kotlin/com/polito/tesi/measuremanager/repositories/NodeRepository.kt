@@ -25,4 +25,7 @@ interface NodeRepository: JpaRepository<Node, Long>, PagingAndSortingRepository<
 
     fun findAllByName(name:String) : List<Node>
     fun findAllByName(name:String, pageable: Pageable) : Page<Node>
+
+    fun findByControlUnits_NetworkId(networkId: Long): Node?
+
 }

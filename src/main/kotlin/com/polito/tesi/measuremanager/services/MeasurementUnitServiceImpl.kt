@@ -25,7 +25,6 @@ import kotlin.jvm.optionals.getOrElse
 @Service
 class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository, private val ur: UserRepository, private val kmu : KafkaMuProducer) : MeasurementUnitService {
 
-
     override fun get(id: Long): MeasurementUnitDTO? {
         if(isAdmin())
             return mur.findByIdOrNull(id)?.toDTO()
@@ -267,6 +266,67 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         }
 
         return ur.save(newUser)
+    }
+
+    fun createMuByModel(networkId: Long, model: Int) : MeasurementUnit {
+        var measurementUnit = MeasurementUnit().apply {
+            this.networkId = networkId
+            this.model = model
+        }
+
+        if (model == 1) {
+            val defaultSensors = listOf(
+                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
+                PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
+                HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
+                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
+
+                )
+            measurementUnit.sensors.addAll(defaultSensors)
+        }
+        return measurementUnit
+    }
+
+    @Transactional
+    override fun registerMu(muNetworkId: Long, cuNetworkId: Long, muModel: Int) {
+        val existingMu = mur.findByNetworkId(muNetworkId)
+
+        if (existingMu != null) {
+            println("MU $muNetworkId già presente. Verifico se il nodo è cambiato...")
+            val targetNode = nr.findByControlUnits_NetworkId(cuNetworkId)
+                ?: throw EntityNotFoundException("CU $cuNetworkId non associata a nessun nodo")
+
+            // Se la MU è già esistente ma associata a un altro nodo (o nessun nodo), aggiorniamo
+            if (existingMu.node?.id != targetNode.id) {
+                existingMu.node = targetNode
+                mur.save(existingMu)
+                println("MU $muNetworkId riassociata al nodo ${targetNode.id}")
+            }
+        } else {
+            // La MU è nuova, dobbiamo crearla e associarla al nodo della CU
+            val node = nr.findByControlUnits_NetworkId(cuNetworkId)
+                ?: throw EntityNotFoundException("Attenzione: CU $cuNetworkId non associata a nessun nodo o non esistente")
+
+            // 1. Creiamo l'istanza in base al modello (usando la funzione helper)
+            val mu = createMuByModel(muNetworkId, muModel)
+
+            // 2. Associazioni fondamentali
+            mu.node = node
+            mu.user = node.user // La MU eredita il proprietario del nodo
+
+            // 3. Salvataggio
+            val savedMu = mur.save(mu)
+
+            // 4. Aggiorniamo la collezione nel nodo per coerenza della cache JPA
+            node.measurementUnits.add(savedMu)
+            nr.save(node)
+
+            // 5. Notifichiamo il resto del sistema tramite Kafka
+            val event = EventMU(eventType = "CREATE", mu = savedMu.toMUCreateDTO())
+            kmu.sendMuCreate(event)
+
+            println("Nuova MU $muNetworkId registrata con successo sotto il nodo ${node.id}")
+        }
     }
 
     fun isAdmin() : Boolean{

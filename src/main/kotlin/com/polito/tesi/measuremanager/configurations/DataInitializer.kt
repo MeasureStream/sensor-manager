@@ -16,6 +16,7 @@ import org.springframework.data.geo.Point
 import org.springframework.stereotype.Component
 import kotlin.random.Random
 
+//TODO ("AGGIUSTA QUESTO COMPONENTE")
 @Profile("dev")
 @Component
 class DataInitializer(
@@ -67,8 +68,8 @@ class DataInitializer(
 
         val m1 = MeasurementUnit().apply {
                         networkId =  47L
-                        type = "Temperature"
-                        measuresUnit = "°C"
+//                        type = "Temperature"
+//                        measuresUnit = "°C"
                         node = null
                         this.user = user1
                     }
@@ -117,8 +118,8 @@ class DataInitializer(
                 0 -> {
                     MeasurementUnit().apply {
                         networkId =  1L
-                        type = "Temperature"
-                        measuresUnit = "°C"
+//                        type = "Temperature"
+//                        measuresUnit = "°C"
                         node = null
                         this.user = user
                     }
@@ -127,8 +128,8 @@ class DataInitializer(
                 10 -> {
                     MeasurementUnit().apply {
                         networkId =  11L
-                        type = "Pressure"
-                        measuresUnit = "Pa"
+//                        type = "Pressure"
+//                        measuresUnit = "Pa"
                         node = null
                         this.user = user
                     }
@@ -136,13 +137,13 @@ class DataInitializer(
                 else -> {
                     MeasurementUnit().apply {
                         networkId = (i + 1).toLong()
-                        type = listOf("Temperature", "Pressure", "Humidity").random()
-                        measuresUnit = when (type) {
-                            "Temperature" -> "°C"
-                            "Pressure" -> "Pa"
-                            "Humidity" -> "%"
-                            else -> "unknown"
-                        }
+//                        type = listOf("Temperature", "Pressure", "Humidity").random()
+//                        measuresUnit = when (type) {
+//                            "Temperature" -> "°C"
+//                            "Pressure" -> "Pa"
+//                            "Humidity" -> "%"
+//                            else -> "unknown"
+//                        }
 
                         node = null
                         this.user = user
@@ -200,8 +201,8 @@ class DataInitializer(
             }
         val mesurementUnit = MeasurementUnit().apply {
             networkId =  21
-            type = "Temperature"
-            measuresUnit = "°C"
+//            type = "Temperature"
+//            measuresUnit = "°C"
             node = null
             this.user = user
         }

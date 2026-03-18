@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service
 
 @Service
 class KafkaCUMuConsumer(private val measurementUnitService: MeasurementUnitServiceImpl) {
-    @KafkaListener(topics = ["mu-registration"])
+    @KafkaListener(topics = ["mu-registration"] , groupId = "measure-manager-group")
     fun consumeMuRegistration(dto: MuRegistrationDTO) {
         println("Ricevuto DTO: $dto")
         try {

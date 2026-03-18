@@ -43,7 +43,5 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            # Se sono su branch mario, tagga come :mario e :mario-1.0.0
-            # Se sono su branch main, tagga come :latest, :main e :1.0.0
             ${{ github.ref_name == 'mario' && format('christiand9699/sensor-manager-mario:mario,christiand9699/sensor-manager-mario:mario-{0}', steps.version.outputs.VERSION) || '' }}
             ${{ github.ref_name == 'main' && format('christiand9699/sensor-manager:latest,christiand9699/sensor-manager:main,christiand9699/sensor-manager:{0}', steps.version.outputs.VERSION) || '' }}

@@ -268,32 +268,33 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         return ur.save(newUser)
     }
 
-    fun createMuByModel(networkId: Long, model: Int) : MeasurementUnit {
-        var measurementUnit = MeasurementUnit().apply {
+    fun createMuByModel(networkId: Long, model: Int): MeasurementUnit {
+        val mu = MeasurementUnit().apply {
             this.networkId = networkId
             this.model = model
+            this.sensors = mutableListOf() // Inizializzazione pulita
         }
 
-        if (model == 1) {
-            val defaultSensors = listOf(
-                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
-                PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
-                HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
-                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
-
-                )
-            measurementUnit.sensors.addAll(defaultSensors)
+        // Funzione helper interna per evitare ripetizioni e garantire la bi-direzionalità
+        fun addSensor(sensor: Sensor, index: Int) {
+            sensor.measurementUnit = mu  // Lato "Owner" della relazione (fondamentale per il DB)
+            sensor.sensorIndex = index
+            mu.sensors.add(sensor)       // Lato "Inverse" (fondamentale per il DTO/API)
         }
 
-        if (model == 100) {
-            val defaultSensors = listOf(
-                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
-                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 2},
-
-                )
-            measurementUnit.sensors.addAll(defaultSensors)
+        when (model) {
+            1 -> {
+                addSensor(AccelerometerSensor(), 1)
+                addSensor(PressureSensor(), 2)
+                addSensor(HumiditySensor(), 3)
+                addSensor(NTCSensor(), 4)
+            }
+            100 -> {
+                addSensor(AccelerometerSensor(), 1)
+                addSensor(NTCSensor(), 2)
+            }
         }
-        return measurementUnit
+        return mu
     }
 
     @Transactional

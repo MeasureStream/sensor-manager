@@ -102,7 +102,7 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                 AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
                 PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
                 HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
-                NTCSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
+                NTCTemperatureSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
 
             )
             measurementUnit.sensors.addAll(defaultSensors)
@@ -287,11 +287,11 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
                 addSensor(AccelerometerSensor(), 1)
                 addSensor(PressureSensor(), 2)
                 addSensor(HumiditySensor(), 3)
-                addSensor(NTCSensor(), 4)
+                addSensor(NTCTemperatureSensor(), 4)
             }
             100 -> {
                 addSensor(AccelerometerSensor(), 1)
-                addSensor(NTCSensor(), 2)
+                addSensor(NTCTemperatureSensor(), 2)
             }
         }
         return mu

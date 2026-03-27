@@ -10,6 +10,7 @@ import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
+import com.polito.tesi.measuremanager.template.SensorMapper
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityExistsException
 import jakarta.persistence.EntityNotFoundException
@@ -28,31 +29,26 @@ class MeasurementUnitServiceImpl(
     private val nr: NodeRepository,
     private val ur: UserRepository,
     private val kmu: KafkaMuProducer,
-    private val templateService: TemplateService
+    private val sensorMapper: SensorMapper
 ) : MeasurementUnitService {
 
     override fun get(id: Long): MeasurementUnitDTO? {
-        if(isAdmin())
-            return mur.findByIdOrNull(id)?.toDTO()
+        val mu = if(isAdmin()) mur.findByIdOrNull(id)
+        else mur.findByIdAndUser_UserId(id, getCurrentUserId())
 
-        val userId = getCurrentUserId()
-        return mur.findByIdAndUser_UserId(id,userId)?.toDTO() ?: throw EntityNotFoundException("MeasurementUnit $id not found")
+        return mu?.let { sensorMapper.toUnitDTO(it) }
     }
 
     override fun getAll(networkId: Long?, controlUnitNId: Long?, controlUnitName: String?): List<MeasurementUnitDTO> {
-        if(isAdmin()){
-            networkId?.let {
-                return mur.findAllByNetworkId(it).map { e -> e.toDTO() }
+        val units = when {
+            isAdmin() -> networkId?.let { mur.findAllByNetworkId(it) } ?: mur.findAll()
+            else -> {
+                val userId = getCurrentUserId()
+                networkId?.let { mur.findAllByNetworkIdAndUser_UserId(it, userId) }
+                    ?: mur.findAllByUser_UserId(userId)
             }
-                return mur.findAll().map { it.toDTO() }
         }
-        val userId = getCurrentUserId()
-        networkId?.let {
-
-            return mur.findAllByNetworkIdAndUser_UserId(it,userId).map { e->e.toDTO() }
-            }
-        return mur.findAllByUser_UserId(userId).map { it.toDTO() }
-
+        return units.map { sensorMapper.toUnitDTO(it) }
     }
 
     @Transactional
@@ -131,7 +127,7 @@ class MeasurementUnitServiceImpl(
         val event = EventMU(eventType = "CREATE", mu = savedM.toMUCreateDTO())
 
         kmu.sendMuCreate(event)
-        return savedM.toDTO()
+        return sensorMapper.toUnitDTO(savedM)
 
     }
     @Transactional

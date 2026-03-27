@@ -18,4 +18,4 @@ data class MeasurementUnitDTO(
     val sensors: List<SensorDTO> = emptyList()
 )
 
-fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,model,node?.id, sensors = sensors.map { it.toDTO() })
+fun MeasurementUnit.toDTO() = MeasurementUnitDTO(id,networkId,model,node?.id)

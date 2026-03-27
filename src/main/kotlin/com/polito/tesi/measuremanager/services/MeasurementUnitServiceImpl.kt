@@ -10,6 +10,7 @@ import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.NodeRepository
 import com.polito.tesi.measuremanager.repositories.UserRepository
+import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityExistsException
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
@@ -19,11 +20,16 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Service
-import kotlin.jvm.Throws
 import kotlin.jvm.optionals.getOrElse
 
 @Service
-class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,private val nr: NodeRepository, private val ur: UserRepository, private val kmu : KafkaMuProducer) : MeasurementUnitService {
+class MeasurementUnitServiceImpl(
+    private val mur: MeasurementUnitRepository,
+    private val nr: NodeRepository,
+    private val ur: UserRepository,
+    private val kmu: KafkaMuProducer,
+    private val templateService: TemplateService
+) : MeasurementUnitService {
 
     override fun get(id: Long): MeasurementUnitDTO? {
         if(isAdmin())
@@ -99,10 +105,15 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
 
         if (m.model == 1) {
             val defaultSensors = listOf(
-                AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
-                PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
-                HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
-                NTCTemperatureSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
+                Sensor(measurementUnit = measurementUnit, modelName = "accelerometer_lsm6dsm", sensorIndex = 1),
+                Sensor(measurementUnit = measurementUnit, modelName = "humidity_hpp845e", sensorIndex = 2),
+                Sensor(measurementUnit = measurementUnit, modelName = "humidity_hpp845e", sensorIndex = 3),
+                Sensor(measurementUnit = measurementUnit, modelName = "ntc_temperature", sensorIndex = 4),
+
+                //AccelerometerSensor().apply { measurementUnit = measurementUnit; sensorIndex = 1},
+                //PressureSensor().apply { measurementUnit = measurementUnit; sensorIndex = 2},
+                //HumiditySensor().apply { measurementUnit = measurementUnit; sensorIndex = 3 },
+                //NTCTemperatureSensor().apply { measurementUnit = measurementUnit;sensorIndex = 4 },
 
             )
             measurementUnit.sensors.addAll(defaultSensors)
@@ -268,32 +279,40 @@ class MeasurementUnitServiceImpl(private val mur:MeasurementUnitRepository,priva
         return ur.save(newUser)
     }
 
+
+
+
     fun createMuByModel(networkId: Long, model: Int): MeasurementUnit {
         val mu = MeasurementUnit().apply {
             this.networkId = networkId
             this.model = model
-            this.sensors = mutableListOf() // Inizializzazione pulita
+            this.sensors = mutableListOf()
         }
 
-        // Funzione helper interna per evitare ripetizioni e garantire la bi-direzionalità
-        fun addSensor(sensor: Sensor, index: Int) {
-            sensor.measurementUnit = mu  // Lato "Owner" della relazione (fondamentale per il DB)
-            sensor.sensorIndex = index
-            mu.sensors.add(sensor)       // Lato "Inverse" (fondamentale per il DTO/API)
+        // Funzione helper interna per aggiungere sensori alla MU
+        fun addSensor(modelName: String, index: Int) {
+            val sensor = Sensor(
+                modelName = modelName,
+                measurementUnit = mu,
+                sensorIndex = index
+            )
+            mu.sensors.add(sensor)
         }
 
         when (model) {
             1 -> {
-                addSensor(AccelerometerSensor(), 1)
-                addSensor(PressureSensor(), 2)
-                addSensor(HumiditySensor(), 3)
-                addSensor(NTCTemperatureSensor(), 4)
+                addSensor("accelerometer_lsm6dsm", 1)
+                addSensor("pressure_ms5837", 2)
+                addSensor("humidity_hpp845e", 3)
+                addSensor("ntc_temperature", 4)
             }
             100 -> {
-                addSensor(AccelerometerSensor(), 1)
-                addSensor(NTCTemperatureSensor(), 2)
+                addSensor("accelerometer_lsm6dsm", 1)
+                addSensor("ntc_temperature", 2)
             }
+            else -> throw OperationNotAllowed("Model $model not supported")
         }
+
         return mu
     }
 

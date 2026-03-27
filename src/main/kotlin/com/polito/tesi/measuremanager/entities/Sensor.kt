@@ -4,11 +4,55 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.Id
-import jakarta.persistence.Inheritance
-import jakarta.persistence.InheritanceType
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 
+
+
+@Entity
+class Sensor(
+
+    @Id @GeneratedValue
+    var id: Long = 0,
+
+    // Chiave logica → matcha il nome file JSON
+    var modelName: String,
+
+    @ManyToOne
+    @JoinColumn(name = "mu_id")
+    var measurementUnit: MeasurementUnit?,
+
+    var sensorIndex: Int = 0,
+
+    // Runtime values
+    var physVal: Double = 0.0,
+    var elecVal: Double = 0.0,
+    var samplingF: Double = 0.0,
+    var phyThreshold: Double = 0.0,
+
+    var isUpperThresholdMax: Boolean = false,
+    var isLowerThresholdMin: Boolean = false,
+
+    // 🔥 SOLO se calibrati per singolo sensore reale
+    var coeffA: Double? = null,
+    var coeffB: Double? = null,
+    var coeffC: Double? = null,
+    var coeffD: Double? = null,
+
+    // Metadata reali
+    var calDate: Long? = null,
+    var measLocId: Long? = null,
+
+    @Column(length = 250)
+    var calInitials: String? = null
+)
+
+
+/*
+
+
+import jakarta.persistence.Inheritance
+import jakarta.persistence.InheritanceType
 @Entity
 @Inheritance(strategy = InheritanceType.JOINED) // Crea tabelle separate per i dati specifici
 abstract class Sensor(
@@ -23,6 +67,15 @@ abstract class Sensor(
     var PhyThreshold: Double = -40.0,
     var isUpperThresholdMax: Boolean = false, //Se è superiore threshold superiore
     var isLowerThresholdMin: Boolean = false, //Se è inferiore alla threshold minore
+
+    var coeffA: Double = 0.0,
+    //var coeffASI
+    var coeffB: Double = 0.0,
+    //var coeffBSI
+    var coeffC: Double = 0.0,
+    //var coeffCSI
+    var coeffD: Double = 0.0,
+    //var coeffDSI
 
 )
 
@@ -167,3 +220,4 @@ class AccelerometerSensor : Sensor(modelName = "LSM6DSM", measurementUnit = null
     // Block B: Metadata
     var calDate: Long = 0L
 }
+*/

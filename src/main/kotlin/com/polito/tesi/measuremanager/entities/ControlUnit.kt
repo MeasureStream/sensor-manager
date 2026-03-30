@@ -2,7 +2,7 @@ package com.polito.tesi.measuremanager.entities
 
 import jakarta.persistence.*
 import jakarta.validation.constraints.*
-
+import org.springframework.data.geo.Point
 
 @Entity
 class ControlUnit {
@@ -23,9 +23,8 @@ class ControlUnit {
     var rssi : Double = 0.0
 
 
+     var location : Point? = null
 
-    @ManyToOne
-    var node :  Node? = null
 
     @ManyToOne
     lateinit var user: User

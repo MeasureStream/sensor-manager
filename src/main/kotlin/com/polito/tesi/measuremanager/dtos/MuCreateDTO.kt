@@ -8,5 +8,4 @@ data class MuCreateDTO(
     val model: Int,
 )
 
-fun MeasurementUnit.toMUCreateDTO() = MuCreateDTO(networkId, user.userId, model)
-
+fun MeasurementUnit.toMUCreateDTO() = MuCreateDTO(extendedId, user.userId, model)

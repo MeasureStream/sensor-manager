@@ -7,14 +7,18 @@ import org.springframework.stereotype.Service
 
 @Service
 class KafkaCUMuConsumer(private val measurementUnitService: MeasurementUnitServiceImpl) {
-    @KafkaListener(topics = ["mu-registration"] , groupId = "measure-manager-group", properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.MuRegistrationDTO"])
+    @KafkaListener(
+        topics = ["mu-registration"],
+        groupId = "measure-manager-group",
+        properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.MuRegistrationDTO"],
+    )
     fun consumeMuRegistration(dto: MuRegistrationDTO) {
         println("Ricevuto DTO: $dto")
         try {
             measurementUnitService.registerMu(
                 muNetworkId = dto.muId.toLong(),
                 cuNetworkId = dto.cuId.toLong(),
-                muModel = dto.modelMu.toInt()
+                muModel = dto.modelMu.toInt(),
             )
         } catch (e: Exception) {
             println("ERRORE durante l'elaborazione del messaggio: ${e.message}")

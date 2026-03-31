@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/API/user")
 class UserController(private val us: UserService) {
-    @GetMapping("/","")
-    fun list() :List<UserDTO>{
+    @GetMapping("/", "")
+    fun list(): List<UserDTO>  {
         return us.list()
     }
 }

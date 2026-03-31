@@ -1,22 +1,20 @@
 package com.polito.tesi.measuremanager.template
 
-
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.dtos.SensorDTO
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Sensor
-import com.polito.tesi.measuremanager.template.TemplateService
 import org.springframework.stereotype.Component
 
 @Component
 class SensorMapper(private val templateService: TemplateService) {
-
     /**
      * Converte un singolo Sensor in SensorDTO recuperando il template
      */
     fun toSensorDTO(sensor: Sensor): SensorDTO {
-        val template = templateService.getTemplate(sensor.modelName)
-            ?: throw IllegalArgumentException("Template for ${sensor.modelName} not found")
+        val template =
+            templateService.getTemplate(sensor.modelName)
+                ?: throw IllegalArgumentException("Template for ${sensor.modelName} not found")
 
         return SensorDTO(
             id = sensor.id,
@@ -35,7 +33,7 @@ class SensorMapper(private val templateService: TemplateService) {
             calDate = sensor.calDate,
             measLocId = sensor.measLocId,
             calInitials = sensor.calInitials,
-            sensorTemplate = template
+            sensorTemplate = template,
         )
     }
 
@@ -48,7 +46,7 @@ class SensorMapper(private val templateService: TemplateService) {
             networkId = unit.networkId,
             model = unit.model,
             nodeId = unit.node?.id,
-            sensors = unit.sensors.map { toSensorDTO(it) }
+            sensors = unit.sensors.map { toSensorDTO(it) },
         )
     }
 }

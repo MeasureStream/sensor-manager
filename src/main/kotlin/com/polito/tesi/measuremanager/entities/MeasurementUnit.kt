@@ -1,13 +1,9 @@
 package com.polito.tesi.measuremanager.entities
 
 import jakarta.persistence.*
-import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.PositiveOrZero
-import com.polito.tesi.measuremanager.entities.Sensor
 
 @Entity
 class MeasurementUnit {
-
     // Automatic Id
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
@@ -15,12 +11,9 @@ class MeasurementUnit {
 
     // this is the EUID
     @Column(unique = true)
-    var networkId: Long = 0
+    var extendedId: Long = 0
 
-
-    @ManyToOne
-    var node : Node? = null
-
+    var localId: Int = 0
 
     @ManyToOne
     lateinit var user: User
@@ -30,4 +23,8 @@ class MeasurementUnit {
 
     @OneToMany(mappedBy = "measurementUnit", cascade = [CascadeType.ALL], orphanRemoval = true)
     var sensors: MutableList<Sensor> = mutableListOf()
+
+    @ManyToOne
+    @JoinColumn(name = "control_unit_id", nullable = true)
+    var controlUnit: ControlUnit? = null
 }

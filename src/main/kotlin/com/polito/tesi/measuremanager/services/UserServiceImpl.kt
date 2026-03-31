@@ -8,16 +8,15 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Service
 
 @Service
-class UserServiceImpl(private val ur: UserRepository):UserService {
+class UserServiceImpl(private val ur: UserRepository) : UserService {
     override fun list(): List<UserDTO> {
-        if(!isAdmin()) throw OperationNotAllowed("Operation not Allowed")
+        if (!isAdmin()) throw OperationNotAllowed("Operation not Allowed")
         return ur.findAll().map { it.toDTO() }
     }
 
-    fun isAdmin() : Boolean{
+    fun isAdmin(): Boolean  {
         val auth = SecurityContextHolder.getContext().authentication
         val isAdmin = auth.authorities.any { it.authority == "ROLE_app-admin" }
         return isAdmin
     }
-
 }

@@ -20,10 +20,9 @@ class ControlUnitController(
 ) {
     @GetMapping("/", "")
     fun get(
-        @RequestParam networkId: Long?,
         @RequestParam name: String?,
     ): List<ControlUnitDTO> {
-        return cs.getAllControlUnits(networkId = networkId, name = name)
+        return cs.getAllControlUnits( name = name)
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)
@@ -37,8 +36,8 @@ class ControlUnitController(
     @ResponseStatus(HttpStatus.ACCEPTED)
     @DeleteMapping("/", "")
     fun deleteCU(
-        @Valid @RequestBody cu: ControlUnitDTO,
+        @RequestParam id: Long,
     )  {
-        return cs.delete(cu.id)
+        return cs.delete(id)
     }
 }

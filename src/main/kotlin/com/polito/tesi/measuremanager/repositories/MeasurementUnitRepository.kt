@@ -34,9 +34,6 @@ interface MeasurementUnitRepository : JpaRepository<MeasurementUnit, Long>, Pagi
     ): Page<MeasurementUnit>
 
 
-
-
-
     fun findAllByExtendedId(networkId: Long): List<MeasurementUnit>
 
     fun findByExtendedIdAndUser_UserId(
@@ -51,6 +48,7 @@ interface MeasurementUnitRepository : JpaRepository<MeasurementUnit, Long>, Pagi
         networkId: Long,
         pageable: Pageable,
     ): Page<MeasurementUnit>
+
 
 
 

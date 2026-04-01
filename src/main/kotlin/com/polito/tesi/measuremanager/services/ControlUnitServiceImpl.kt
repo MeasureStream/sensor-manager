@@ -4,14 +4,13 @@ import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
-import com.polito.tesi.measuremanager.entities.User
+import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.template.TemplateService
-import jakarta.persistence.EntityExistsException
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
 import org.springframework.data.domain.Page
@@ -32,14 +31,13 @@ class ControlUnitServiceImpl(
     override fun getAllControlUnits(
         name: String?,
     ): List<ControlUnitDTO> {
-        if (ss.isAdmin())
-            {
+        if (ss.isAdmin()) {
 
-                name?.let {
-                    return cur.findAllByName(it).map { e -> e.toDTO(templateService) }
-                }
-                return cur.findAll().map { it.toDTO(templateService) }
+            name?.let {
+                return cur.findAllByName(it).map { e -> e.toDTO(templateService) }
             }
+            return cur.findAll().map { it.toDTO(templateService) }
+        }
 
         val userId = ss.getCurrentUserId()
 
@@ -54,23 +52,22 @@ class ControlUnitServiceImpl(
             return cur.findByIdOrNull(id)?.toDTO(templateService)
         }
         val userId = ss.getCurrentUserId()
-        return cur.findByIdAndUser_UserId(id, userId)?.toDTO(templateService) ?: throw EntityNotFoundException("ControlUnit $id not found")
+        return cur.findByIdAndUser_UserId(id, userId)?.toDTO(templateService)
+            ?: throw EntityNotFoundException("ControlUnit $id not found")
     }
 
     override fun getAllControlUnitsPage(
         page: Pageable,
         name: String?,
     ): Page<ControlUnitDTO> {
-        if (ss.isAdmin())
-            {
+        if (ss.isAdmin()) {
 
-                return cur.findAll(page).map { it.toDTO(templateService) }
-            }
+            return cur.findAll(page).map { it.toDTO(templateService) }
+        }
         val userId = ss.getCurrentUserId()
 
         return cur.findAllByUser_UserId(userId, page).map { it.toDTO(templateService) }
     }
-
 
 
     @Transactional
@@ -78,7 +75,7 @@ class ControlUnitServiceImpl(
         id: Long,
         c: ControlUnitDTO,
     ): ControlUnitDTO {
-       TODO("ancora da implementare")
+        TODO("QUI DOVRANNO essere Mandati i comandi")
 
 
     }
@@ -108,7 +105,6 @@ class ControlUnitServiceImpl(
     override fun delete(id: Long) {
         if (!ss.isAdmin()) throw OperationNotAllowed("You can't delete a ControlUnit if you are not an admin")
 
-        val userId = ss.getCurrentUserId()
         val cu = cur.findById(id).get()
         val cuCreateDTO = cu.toCuCreateDTO()
 
@@ -118,60 +114,126 @@ class ControlUnitServiceImpl(
     }
 
 
+    fun createMuByModel(
+        extendedId: Long,
+        model: Int,
+        localId: Int
+    ): MeasurementUnit {
+        val mu =
+            MeasurementUnit().apply {
+                this.extendedId = extendedId
+                this.model = model
+                this.sensors = mutableListOf()
+                this.localId = localId
+            }
+
+        // Funzione helper interna per aggiungere sensori alla MU
+        fun addSensor(
+            modelName: String,
+            index: Int,
+        ) {
+            val sensor =
+                Sensor(
+                    modelName = modelName,
+                    measurementUnit = mu,
+                    sensorIndex = index,
+                )
+            mu.sensors.add(sensor)
+        }
+
+        when (model) {
+            1 -> {
+                addSensor("accelerometer_lsm6dsm", 1)
+                addSensor("pressure_ms5837", 2)
+                addSensor("humidity_hpp845e", 3)
+                addSensor("ntc_temperature", 4)
+            }
+
+            100 -> {
+                addSensor("accelerometer_lsm6dsm", 1)
+                addSensor("ntc_temperature", 2)
+            }
+
+            else -> throw OperationNotAllowed("Model $model not supported")
+        }
+
+        return mu
+    }
+
+
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
         // 1. Recupera o crea la CU
         val cu = getOrCreateControlUnit(c.devEui)
+        val savedCu = cur.save(cu)
 
-        // 2. Sincronizza le MU (Measurement Units)
+        // 2. PULIZIA: Scolleghiamo le MU esistenti
+        // Usiamo .toList() per creare una copia della lista ed evitare problemi di iterazione
+        // mentre modifichiamo i riferimenti
+        savedCu.measurementUnits.toList().forEach { mu ->
+            mu.controlUnit = null
+            mur.save(mu)
+        }
+        // Svuotiamo la lista lato CU per sincronizzare lo stato in memoria
+        savedCu.measurementUnits.clear()
+
+        // 3. Elaborazione della nuova lista hardware
         c.muList.forEach { muDesc ->
-            val mu = mur.findByExtendedId(muDesc.extendedId) ?: MeasurementUnit().apply {
-                extendedId = muDesc.extendedId
+            var mu = mur.findByExtendedId(muDesc.extendedId)
+
+            if (mu == null) {
+                mu = createMuByModel(muDesc.extendedId, muDesc.model, muDesc.localId)
+            } else {
+                mu.model = muDesc.model
+                mu.localId = muDesc.localId
             }
 
-            mu.controlUnit = cu
-            mu.localId = muDesc.localId
-            mu.model = muDesc.model
+            // 4. SINCRONIZZAZIONE
+            mu.controlUnit = savedCu
+            mu.user = savedCu.user
+
+            // Importante: aggiungiamo la MU alla lista della CU per mantenere la coerenza bidirezionale
+            savedCu.measurementUnits.add(mu)
 
             mur.save(mu)
         }
 
-        cur.save(cu)
+        // Il save finale della CU aggiornerà tutto l'albero
+        cur.save(savedCu)
     }
 
-    @Transactional
-    override fun onStatusUpdate(c: CuStatusUpdate) {
-        // 1. Recupera o crea la CU
-        val cu = getOrCreateControlUnit(c.devEui)
+        @Transactional
+        override fun onStatusUpdate(c: CuStatusUpdate) {
+            // 1. Recupera o crea la CU
+            val cu = getOrCreateControlUnit(c.devEui)
 
-        // 2. Aggiorna i parametri dinamici (Byte 5 e 6-7 della tabella)
-        // Convertiamo il batteryLevel (0-255 o 0-100) nel Double dell'entità
-        cu.remainingBattery = c.batteryLevel.toDouble()
+            // 2. Aggiorna i parametri dinamici (Byte 5 e 6-7 della tabella)
+            // Convertiamo il batteryLevel (0-255 o 0-100) nel Double dell'entità
+            cu.remainingBattery = c.batteryLevel.toDouble()
 
-        // Se hai un campo per lo stato grezzo o per il modello della CU
-        // cu.statusRaw = c.statusRaw
-        cu.model = c.model
+            // Se hai un campo per lo stato grezzo o per il modello della CU
+            // cu.statusRaw = c.statusRaw
+            cu.model = c.model
 
-        cur.save(cu)
-    }
-
-
-
-    /**
-     * Funzione di supporto per garantire l'idempotenza:
-     * Se la CU esiste la restituisce, altrimenti ne crea una "orfana" pronta per il claim.
-     */
-    private fun getOrCreateControlUnit(devEui: Long): ControlUnit {
-        return cur.findByDevEui(devEui) ?: ControlUnit().apply {
-            this.devEui = devEui
-            // Generiamo il networkId (l'hash per il QR/Claim) partendo dal devEui
-
-            this.name = "New Device (${devEui})"
-            this.user = null // Rimane null finché l'utente non fa il claim
-            this.remainingBattery = 100.0
+            cur.save(cu)
         }
+
+
+        /**
+         * Funzione di supporto per garantire l'idempotenza:
+         * Se la CU esiste la restituisce, altrimenti ne crea una "orfana" pronta per il claim.
+         */
+        fun getOrCreateControlUnit(devEui: Long): ControlUnit {
+            return cur.findByDevEui(devEui) ?: ControlUnit().apply {
+                this.devEui = devEui
+                // Generiamo il networkId (l'hash per il QR/Claim) partendo dal devEui
+
+                this.name = "New Device (${devEui})"
+                this.user = null // Rimane null finché l'utente non fa il claim
+                this.remainingBattery = 100.0
+            }
+        }
+
+
     }
 
-
-
-}

@@ -8,15 +8,15 @@ interface MeasurementUnitService {
     fun get(id: Long): MeasurementUnitDTO?
 
     fun getAll(
-        networkId: Long?,
-        controlUnitNId: Long?,
+        extendedId: Long?,
+        controlUnitDevEUI: Long?,
         controlUnitName: String?,
     ): List<MeasurementUnitDTO>
 
     fun getAllPage(
         page: Pageable,
-        networkId: Long?,
-        controlUnitNId: Long?,
+        extendedId: Long?,
+        controlUnitDevEUI: Long?,
         controlUnitName: String?,
     ): Page<MeasurementUnitDTO>
 
@@ -30,9 +30,5 @@ interface MeasurementUnitService {
     fun delete(id: Long)
 
 
-    fun registerMu(
-        muNetworkId: Long,
-        cuNetworkId: Long,
-        muModel: Int,
-    )
+
 }

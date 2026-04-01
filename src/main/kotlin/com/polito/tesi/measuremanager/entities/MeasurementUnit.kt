@@ -16,7 +16,7 @@ class MeasurementUnit {
     var localId: Int = 0
 
     @ManyToOne
-    lateinit var user: User
+    var user: User? = null
 
     // is a number that it is used to implement a default set of sensors
     var model: Int = 0
@@ -25,6 +25,6 @@ class MeasurementUnit {
     var sensors: MutableList<Sensor> = mutableListOf()
 
     @ManyToOne
-    @JoinColumn(name = "control_unit_id", nullable = true)
+    @JoinColumn( nullable = true)
     var controlUnit: ControlUnit? = null
 }

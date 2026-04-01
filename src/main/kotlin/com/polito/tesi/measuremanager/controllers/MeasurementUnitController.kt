@@ -13,11 +13,11 @@ class MeasurementUnitController(
 ) {
     @GetMapping("/", "")
     fun get(
-        @RequestParam networkId: Long?,
+        @RequestParam extendedId: Long?,
         @RequestParam controlUnitName: String?,
-        @RequestParam controlUnitNId: Long?,
+        @RequestParam controlUnitDevEUI: Long?,
     ): List<MeasurementUnitDTO> {
-        return mus.getAll(networkId = networkId, controlUnitNId = controlUnitNId, controlUnitName = controlUnitName)
+        return mus.getAll(extendedId = extendedId, controlUnitDevEUI = controlUnitDevEUI, controlUnitName = controlUnitName)
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)

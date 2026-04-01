@@ -43,9 +43,10 @@ class SensorMapper(private val templateService: TemplateService) {
     fun toUnitDTO(unit: MeasurementUnit): MeasurementUnitDTO {
         return MeasurementUnitDTO(
             id = unit.id,
-            networkId = unit.networkId,
+            extendedId = unit.extendedId,
+            localId = unit.localId,
             model = unit.model,
-            nodeId = unit.node?.id,
+            controlUnitId = unit.controlUnit?.id,
             sensors = unit.sensors.map { toSensorDTO(it) },
         )
     }

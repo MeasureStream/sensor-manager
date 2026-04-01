@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service
 @Service
 class KafkaCUMuConsumer(private val cus: ControlUnitServiceImpl) {
     @KafkaListener(
-        topics = ["cu-registration"],
+        topics = ["cu-join-notification"],
         groupId = "measure-manager-group",
         properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.MuRegistrationDTO"],
     )

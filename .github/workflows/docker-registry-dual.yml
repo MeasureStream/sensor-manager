@@ -2,7 +2,7 @@ name: Build and Push Multi-Arch
 
 on:
   push:
-    branches: [ main, mario ]
+    branches: [ main, mario, feature/remove-nodes ]
 
 jobs:
   build:
@@ -45,3 +45,4 @@ jobs:
           tags: |
             ${{ github.ref_name == 'mario' && format('christiand9699/sensor-manager-mario:mario,christiand9699/sensor-manager-mario:mario-{0}', steps.version.outputs.VERSION) || '' }}
             ${{ github.ref_name == 'main' && format('christiand9699/sensor-manager:latest,christiand9699/sensor-manager:main,christiand9699/sensor-manager:{0}', steps.version.outputs.VERSION) || '' }}
+             ${{ github.ref_name == 'feature/remove-nodes' && format('christiand9699/sensor-manager:latest-nonodes,christiand9699/sensor-manager:nonodes,christiand9699/sensor-manager-nonodes:{0}', steps.version.outputs.VERSION) || '' }}

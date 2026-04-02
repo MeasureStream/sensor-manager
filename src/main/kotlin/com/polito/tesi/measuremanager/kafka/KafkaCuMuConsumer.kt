@@ -11,7 +11,7 @@ class KafkaCUMuConsumer(private val cus: ControlUnitServiceImpl) {
     @KafkaListener(
         topics = ["cu-join-notification"],
         groupId = "measure-manager-group",
-        properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.MuRegistrationDTO"],
+        properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.CuJoinNotification"],
     )
     fun consumeMuRegistration(dto: CuJoinNotification) {
         println("Ricevuto DTO: $dto")

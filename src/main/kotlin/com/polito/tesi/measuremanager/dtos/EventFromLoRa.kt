@@ -15,5 +15,6 @@ data class CuStatusUpdate(
     val devEui: Long,
     val model: Int,
     val batteryLevel: Int,
+    val isCharging: Boolean,
     val statusRaw: Int
 )

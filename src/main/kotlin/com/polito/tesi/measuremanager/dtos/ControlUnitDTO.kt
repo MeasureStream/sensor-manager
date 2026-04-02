@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NegativeOrZero
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.PositiveOrZero
+import org.springframework.data.geo.Point
 
 data class ControlUnitDTO(
     val id: Long,
@@ -24,6 +25,7 @@ data class ControlUnitDTO(
     val dataRate: Int,
     val usedDC: Int,
     val hasGPS: Boolean,
+    val location: Point?,
     val maxMU: Int,
     // Parametri di configurazione (Settings)
     val setting1: Int,
@@ -51,6 +53,7 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     dataRate = dataRate,
     usedDC = usedDC,
     hasGPS = hasGPS,
+    location = location,
     maxMU = MaxMU,
     setting1 = setting1,
     transmissionPower = transmissionPower,

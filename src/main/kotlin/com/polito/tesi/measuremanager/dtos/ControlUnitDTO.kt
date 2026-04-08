@@ -5,8 +5,8 @@ import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.NegativeOrZero
 import jakarta.validation.constraints.NotBlank
-import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.PositiveOrZero
+import java.time.LocalDateTime
 import org.springframework.data.geo.Point
 
 data class ControlUnitDTO(
@@ -37,8 +37,14 @@ data class ControlUnitDTO(
     val spreadingFactor: Int,
     val codingRate: String,
     val frequency: Int,
+
+    val lastSeen: LocalDateTime?,
+    val usedDailyAirtime: Long,
+    val lastAirtime: Double,
+
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
-    val measurementUnits: List<MeasurementUnitDTO> = listOf()
+    val measurementUnits: List<MeasurementUnitDTO> = listOf(),
+
 )
 
 fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
@@ -63,6 +69,10 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     spreadingFactor = spreadingFactor,
     codingRate = codingRate,
     frequency = frequency,
+    lastSeen = lastSeen,
+    usedDailyAirtime = usedDailyAirtime,
+    lastAirtime = lastAirtime,
+
     // Mappiamo solo gli ID delle MU collegate
     measurementUnits = measurementUnits.map { it.toDTO(templateService) }
 )

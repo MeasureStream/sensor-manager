@@ -251,7 +251,15 @@ class ControlUnitServiceImpl(
         // Aggiorniamo SF e BW (che avevamo messo nel DTO o che possiamo estrarre)
         // Nota: Se hai aggiornato il DTO SignalQualityUpdate includendo SF e BW:
          cu.spreadingFactor = dto.spreadingFactor
-         cu.bandwidth = (dto.bandwidth / 1000).toInt() // Salviamo in kHz se preferisci
+         cu.bandwidth = (dto.bandwidth / 1000) // Salviamo in kHz se preferisci
+
+        val airtimeSeconds = try {
+            dto.airtime.replace("s", "").toDouble()
+        } catch (e: Exception) {
+            0.0
+        }
+        cu.lastAirtime = airtimeSeconds
+        cu.usedDailyAirtime += (airtimeSeconds * 1000).toInt()
 
         // 4. Salvataggio
         cur.save(cu)

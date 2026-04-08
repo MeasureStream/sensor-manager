@@ -68,4 +68,8 @@ class ControlUnit {
 
     //data ultimo pacchetto arrivato
     var lastSeen: LocalDateTime? = null
+
+    var usedDailyAirtime: Long = 0 //dato in ms
+
+    var lastAirtime: Double = 0.0 // dato in secondi
 }

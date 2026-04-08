@@ -13,6 +13,7 @@ import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
+import java.time.LocalDateTime
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
@@ -218,8 +219,48 @@ class ControlUnitServiceImpl(
             cur.save(cu)
         }
 
+    @Transactional
+    override fun onSignalUpdate(dto: SignalQualityUpdate) {
+        // 1. Conversione DevEUI da String (Hex) a Long
+        val devEuiLong = try {
+            dto.devEUI.toLong(16)
+        } catch (e: Exception) {
+            println("Errore conversione DevEUI: ${dto.devEUI}")
+            return
+        }
 
-        /**
+        // 2. Recupero della Control Unit
+        val cu = cur.findByDevEui(devEuiLong) ?: run {
+            println("Segnale ricevuto per CU non censita: $devEuiLong")
+            return
+        }
+
+        // 3. Mappatura dei campi in base alla tua Entity
+        cu.rssi = dto.rssi.toDouble()
+
+        // Mappatura del DataRate:
+        // Se dto.dataRate è "DR5", estraiamo solo il numero 5
+        cu.dataRate = try {
+            dto.dataRate.replace("DR", "").toInt()
+        } catch (e: Exception) {
+            0 // Valore di fallback se il formato non è DRx
+        }
+
+        cu.lastSeen = LocalDateTime.parse(dto.time, java.time.format.DateTimeFormatter.ISO_DATE_TIME)
+
+        // Aggiorniamo SF e BW (che avevamo messo nel DTO o che possiamo estrarre)
+        // Nota: Se hai aggiornato il DTO SignalQualityUpdate includendo SF e BW:
+         cu.spreadingFactor = dto.spreadingFactor
+         cu.bandwidth = (dto.bandwidth / 1000).toInt() // Salviamo in kHz se preferisci
+
+        // 4. Salvataggio
+        cur.save(cu)
+
+        println("Aggiornato segnale per CU ${cu.name} [EUI: ${dto.devEUI}]: RSSI=${cu.rssi}, DR=${cu.dataRate}")
+    }
+
+
+    /**
          * Funzione di supporto per garantire l'idempotenza:
          * Se la CU esiste la restituisce, altrimenti ne crea una "orfana" pronta per il claim.
          */

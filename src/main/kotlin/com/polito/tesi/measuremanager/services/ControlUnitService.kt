@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.services
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
+import com.polito.tesi.measuremanager.dtos.SignalQualityUpdate
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
@@ -23,6 +24,8 @@ interface ControlUnitService {
     fun onJoinNotification(c: CuJoinNotification)
 
     fun onStatusUpdate(c: CuStatusUpdate)
+
+    fun onSignalUpdate(dto : SignalQualityUpdate)
 
 
     fun update(

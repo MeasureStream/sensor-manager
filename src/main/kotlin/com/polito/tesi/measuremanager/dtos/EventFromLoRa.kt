@@ -18,3 +18,13 @@ data class CuStatusUpdate(
     val isCharging: Boolean,
     val statusRaw: Int
 )
+
+data class SignalQualityUpdate(
+    val devEUI: String,
+    val rssi: Int,
+    val dataRate: String,
+    val airtime: String,
+    val time: String,
+    val spreadingFactor: Int,
+    val bandwidth : Int
+)

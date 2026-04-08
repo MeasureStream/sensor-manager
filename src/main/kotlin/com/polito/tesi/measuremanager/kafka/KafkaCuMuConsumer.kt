@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.kafka
 
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
+import com.polito.tesi.measuremanager.dtos.SignalQualityUpdate
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Service
@@ -35,6 +36,23 @@ class KafkaCUMuConsumer(private val cus: ControlUnitServiceImpl) {
             cus.onStatusUpdate(dto)
         } catch (e: Exception) {
             println("ERRORE durante onStatusUpdate: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    @KafkaListener(
+        topics = ["ttn-uplink-signal-quality"],
+        groupId = "measure-manager-group",
+        properties = ["spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.SignalQualityUpdate"],
+    )
+    fun consumeSignalQuality(dto: SignalQualityUpdate) {
+        println("Ricevuto Signal Quality [${dto.devEUI}]: RSSI=${dto.rssi}, DR=${dto.dataRate}, Airtime=${dto.airtime}")
+        try {
+            // Qui dovrai aggiungere un metodo nel tuo ControlUnitServiceImpl per gestire questi dati
+            // Esempio: cus.updateSignalStats(dto)
+            cus.onSignalUpdate(dto)
+        } catch (e: Exception) {
+            println("ERRORE durante consumeSignalQuality: ${e.message}")
             e.printStackTrace()
         }
     }

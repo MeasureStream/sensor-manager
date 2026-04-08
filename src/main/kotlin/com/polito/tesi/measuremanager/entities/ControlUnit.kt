@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.entities
 
 import jakarta.persistence.*
 import jakarta.validation.constraints.*
+import java.time.LocalDateTime
 import org.springframework.data.geo.Point
 
 @Entity
@@ -64,4 +65,7 @@ class ControlUnit {
     var spreadingFactor: Int = 0
     var codingRate: String = ""
     var frequency: Int = 0
+
+    //data ultimo pacchetto arrivato
+    var lastSeen: LocalDateTime? = null
 }

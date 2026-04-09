@@ -12,7 +12,7 @@ import org.springframework.data.geo.Point
 data class ControlUnitDTO(
     val id: Long,
     val devEui: Long,           // Identificativo hardware reale
-
+    val deviceId: String,
     @field:NotBlank(message = "Name is mandatory")
     val name: String,
     @field:PositiveOrZero
@@ -52,7 +52,7 @@ data class ControlUnitDTO(
 fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     id = id,
     devEui = devEui,
-
+    deviceId = deviceId,
     name = name,
     remainingBattery = remainingBattery,
     rssi = rssi,

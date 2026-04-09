@@ -276,6 +276,7 @@ class ControlUnitServiceImpl(
             return cur.findByDevEui(devEui) ?: ControlUnit().apply {
                 this.devEui = devEui
                 // Generiamo il networkId (l'hash per il QR/Claim) partendo dal devEui
+                this.deviceId = deviceId
 
                 this.name = "New Device (${devEui})"
                 this.user = null // Rimane null finché l'utente non fa il claim

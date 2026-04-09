@@ -42,6 +42,8 @@ data class ControlUnitDTO(
     val usedDailyAirtime: Long,
     val lastAirtime: Double,
 
+    val transmissionInterval: Int,
+
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
     val measurementUnits: List<MeasurementUnitDTO> = listOf(),
 
@@ -72,6 +74,7 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     lastSeen = lastSeen,
     usedDailyAirtime = usedDailyAirtime,
     lastAirtime = lastAirtime,
+    transmissionInterval = transmissionInterval,
 
     // Mappiamo solo gli ID delle MU collegate
     measurementUnits = measurementUnits.map { it.toDTO(templateService) }

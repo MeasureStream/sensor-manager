@@ -13,6 +13,8 @@ class ControlUnit {
 
     var model: Int = 0
 
+    lateinit var deviceId: String
+
     @Column(unique = true, nullable = false)
     var devEui: Long = 0
 
@@ -59,6 +61,8 @@ class ControlUnit {
      * Periodo tra due messaggi di stato.
      */
     var pollingInterval: Int = 0
+
+    var transmissionInterval: Int = 0
 
     var semanticLocation : String = ""
     var bandwidth: Int = 0

@@ -165,7 +165,7 @@ class ControlUnitServiceImpl(
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
         // 1. Recupera o crea la CU
-        val cu = getOrCreateControlUnit(c.devEui)
+        val cu = getOrCreateControlUnit(c.devEui, c.deviceId)
         val savedCu = cur.save(cu)
 
         // 2. PULIZIA: Scolleghiamo le MU esistenti
@@ -206,7 +206,7 @@ class ControlUnitServiceImpl(
         @Transactional
         override fun onStatusUpdate(c: CuStatusUpdate) {
             // 1. Recupera o crea la CU
-            val cu = getOrCreateControlUnit(c.devEui)
+            val cu = getOrCreateControlUnit(c.devEui, c.deviceId)
 
             // 2. Aggiorna i parametri dinamici (Byte 5 e 6-7 della tabella)
             // Convertiamo il batteryLevel (0-255 o 0-100) nel Double dell'entità
@@ -272,7 +272,7 @@ class ControlUnitServiceImpl(
          * Funzione di supporto per garantire l'idempotenza:
          * Se la CU esiste la restituisce, altrimenti ne crea una "orfana" pronta per il claim.
          */
-        fun getOrCreateControlUnit(devEui: Long): ControlUnit {
+        fun getOrCreateControlUnit(devEui: Long, deviceId: String): ControlUnit {
             return cur.findByDevEui(devEui) ?: ControlUnit().apply {
                 this.devEui = devEui
                 // Generiamo il networkId (l'hash per il QR/Claim) partendo dal devEui

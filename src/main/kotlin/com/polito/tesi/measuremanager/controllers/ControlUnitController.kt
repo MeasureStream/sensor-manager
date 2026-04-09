@@ -40,7 +40,17 @@ class ControlUnitController(
     fun configureCU(
         @RequestBody command: CUConfigCommandDTO,
     ) {
-        // Chiamiamo un metodo specifico del service
-        cs.sendPollingUpdate(command)
+        // Questo lo vedrai nei log non appena la richiesta "tocca" il controller
+        println(">>> DEBUG SENSOR-MANAGER: Chiamata ricevuta su /polling!")
+        println(">>> DATA: $command")
+
+        try {
+            cs.sendPollingUpdate(command)
+            println(">>> DEBUG SENSOR-MANAGER: Service eseguito correttamente")
+        } catch (e: Exception) {
+            println(">>> DEBUG ERROR: Qualcosa è fallito nel service!")
+            e.printStackTrace() // Questo stampa tutto l'errore nei log di Docker
+            throw e
+        }
     }
 }

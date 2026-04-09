@@ -36,7 +36,7 @@ class ControlUnitController(
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)
-    @PostMapping("/configure")
+    @PostMapping("/configure", "/configure/")
     fun configureCU(
         @Valid @RequestBody command: CUConfigCommandDTO,
     ) {

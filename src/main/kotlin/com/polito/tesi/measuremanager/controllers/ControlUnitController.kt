@@ -1,17 +1,11 @@
 package com.polito.tesi.measuremanager.controllers
 
+import com.polito.tesi.measuremanager.dtos.CUConfigCommandDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.services.ControlUnitService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
-import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.bind.annotation.GetMapping
-import org.springframework.web.bind.annotation.PutMapping
-import org.springframework.web.bind.annotation.ResponseStatus
-import org.springframework.web.bind.annotation.DeleteMapping
-import org.springframework.web.bind.annotation.RequestParam
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/API/controlunits")
@@ -39,5 +33,14 @@ class ControlUnitController(
         @RequestParam id: Long,
     )  {
         return cs.delete(id)
+    }
+
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PostMapping("/configure")
+    fun configureCU(
+        @Valid @RequestBody command: CUConfigCommandDTO,
+    ) {
+        // Chiamiamo un metodo specifico del service
+        cs.sendPollingUpdate(command)
     }
 }

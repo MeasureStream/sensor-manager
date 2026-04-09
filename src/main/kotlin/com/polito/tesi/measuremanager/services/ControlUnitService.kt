@@ -1,9 +1,6 @@
 package com.polito.tesi.measuremanager.services
 
-import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
-import com.polito.tesi.measuremanager.dtos.CuJoinNotification
-import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
-import com.polito.tesi.measuremanager.dtos.SignalQualityUpdate
+import com.polito.tesi.measuremanager.dtos.*
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
@@ -34,5 +31,7 @@ interface ControlUnitService {
     ): ControlUnitDTO
 
     fun delete(id: Long)
+
+    fun sendPollingUpdate(c : CUConfigCommandDTO) : CUConfigCommandDTO?
 
 }

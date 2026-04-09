@@ -114,6 +114,23 @@ class ControlUnitServiceImpl(
         kcu.sendCuCreate(event)
     }
 
+    // Nel ControlUnitServiceImpl.kt
+    override fun sendPollingUpdate(command: CUConfigCommandDTO): CUConfigCommandDTO? {
+        // 1. (Opzionale) Aggiorna il valore nel database per coerenza locale
+        val cu = cur.findByDevEui(command.devEui)
+            ?: throw EntityNotFoundException("CU non trovata")
+        cu.pollingInterval = command.pollingInterval
+        cur.save(cu)
+
+        // 2. Invia il comando verso la CU via Kafka
+        // Supponendo che tu abbia un KafkaTemplate per inviare messaggi
+
+        kcu.sendPollingUpdate(command.deviceId, command)
+
+        println("Comando di polling inviato a ${command.deviceId}: ${command.pollingInterval}s")
+        return command;
+    }
+
 
     fun createMuByModel(
         extendedId: Long,

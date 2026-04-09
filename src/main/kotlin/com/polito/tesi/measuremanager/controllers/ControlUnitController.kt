@@ -36,9 +36,9 @@ class ControlUnitController(
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)
-    @PostMapping("/configure", "/configure/")
+    @PostMapping("/polling", "/polling/")
     fun configureCU(
-        @Valid @RequestBody command: CUConfigCommandDTO,
+        @RequestBody command: CUConfigCommandDTO,
     ) {
         // Chiamiamo un metodo specifico del service
         cs.sendPollingUpdate(command)

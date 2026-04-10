@@ -117,7 +117,7 @@ class ControlUnitServiceImpl(
     // Nel ControlUnitServiceImpl.kt
     override fun sendPollingUpdate(command: CUConfigCommandDTO): CUConfigCommandDTO? {
         // 1. (Opzionale) Aggiorna il valore nel database per coerenza locale
-        val cu = cur.findByDevEui(command.devEui)
+        val cu = cur.findByDevEui(command.devEui.toLong())
             ?: throw EntityNotFoundException("CU non trovata")
         cu.pollingInterval = command.pollingInterval
         cur.save(cu)

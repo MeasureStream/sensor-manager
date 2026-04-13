@@ -8,6 +8,7 @@ import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
+import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.template.TemplateService
@@ -27,6 +28,7 @@ class ControlUnitServiceImpl(
     private val ss: SecurityService,
     private val kcu: KafkaCuProducer,
     private val templateService: TemplateService,
+    private val encoder: LorawanPayloadEncoder,
 ) : ControlUnitService {
 
     override fun getAllControlUnits(
@@ -129,6 +131,71 @@ class ControlUnitServiceImpl(
 
         println("Comando di polling inviato a ${command.deviceId}: ${command.pollingInterval}s")
         return command;
+    }
+
+    override fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO {
+        // 1. Controllo permessi (Security)
+        if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
+
+        // 2. Recupero della Entity CU tramite devEui
+        // Assumiamo che devEui nel DB sia memorizzato come Long o String
+        val cu = cur.findByDevEui(command.devEui.toLong())
+            ?: throw EntityNotFoundException("Control Unit con DevEui ${command.devEui} non trovata")
+
+        // 3. Update dei valori nel Database
+        command.configurations.forEach { muConfig ->
+            // Cerchiamo la MU all'interno della CU
+            val muEntity = cu.measurementUnits.find { it.localId == muConfig.localId }
+
+            muEntity?.let { mu ->
+                muConfig.sensors.forEach { sensorConfig ->
+                    // Cerchiamo il sensore all'interno della MU
+                    val sensorEntity = mu.sensors.find { it.sensorIndex == sensorConfig.sensorIndex }
+
+                    sensorEntity?.let { sensor ->
+                        // Aggiorniamo il valore (samplingF nel DB, samplingPeriod nel comando)
+                        sensor.samplingF = sensorConfig.samplingPeriod.toDouble()
+                    }
+                }
+            }
+        }
+
+        // 4. Salvataggio persistente
+        cur.save(cu)
+
+        // 5. Costruzione del Payload Binario per TTN
+        val out = java.io.ByteArrayOutputStream()
+        out.write(0x0B.toInt()) // Header: Sensor Config
+        out.write(command.configurations.size) // Quante MU stiamo configurando
+
+        command.configurations.forEach { mu ->
+            out.write(mu.localId)           // Indirizzo MU
+            out.write(mu.sensors.size)      // Numero sensori in questa MU
+
+            mu.sensors.forEach { sensor ->
+                out.write(sensor.sensorIndex)
+                // Scriviamo il periodo (assumendo stia in 1 byte, 0-255s)
+                out.write(sensor.samplingPeriod and 0xFF)
+            }
+        }
+
+        // 6. Invio al topic collettore per il Sink MQTT
+        // Usiamo il deviceId della CU come chiave Kafka (lo prendiamo dalla Entity recuperata)
+        val downlinkRequest = DownlinkRequestDTO(
+            deviceId = cu.deviceId,
+            rawPayload = out.toByteArray(),
+            fPort = 16,
+            priority = "NORMAL",
+            confirmed = false
+        )
+
+        // 1. Codifica
+        val encoded = encoder.encodeSensorConfig(command)
+
+        // 2. Invio (usa il deviceId recuperato dalla Entity per il routing MQTT)
+        kcu.sendDownlink(cu.deviceId, encoded)
+
+        return command
     }
 
 

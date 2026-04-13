@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.controllers
 
 import com.polito.tesi.measuremanager.dtos.CUConfigCommandDTO
+import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.services.ControlUnitService
 import jakarta.validation.Valid
@@ -52,5 +53,15 @@ class ControlUnitController(
             e.printStackTrace() // Questo stampa tutto l'errore nei log di Docker
             throw e
         }
+    }
+
+
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PostMapping("/sensors-config")
+    fun configureSensors(
+        @RequestBody command: CUConfigurationDTO,
+    ) {
+        println(">>> DEBUG: Configurazione sensori per CU: ${command.devEui}")
+        cs.sendSensorSamplingUpdate(command)
     }
 }

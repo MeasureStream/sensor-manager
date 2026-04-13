@@ -36,4 +36,22 @@ class KafkaCuProducer(private val kafkaTemplate: KafkaTemplate<String, Any>) {
 
         println("Sent Clean Downlink to Kafka: $downlinkRequest")
     }
+
+    /**
+     * Prende un payload già codificato e lo spara sul topic "clean"
+     */
+    fun sendDownlink(deviceId: String, encoded: EncodedPayload) {
+        val request = DownlinkRequestDTO(
+            deviceId = deviceId,
+            rawPayload = encoded.bytes,
+            fPort = encoded.fPort,
+            priority = "NORMAL",
+            confirmed = false
+        )
+
+        // Usiamo deviceId come chiave per l'ordine dei messaggi
+        kafkaTemplate.send("ttn-downlink-clean", deviceId, request)
+
+        println(">>> KAFKA: Comando inviato a $deviceId su fPort ${encoded.fPort}")
+    }
 }

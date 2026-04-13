@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.kafka
 
 import com.polito.tesi.measuremanager.dtos.CUConfigCommandDTO
+import com.polito.tesi.measuremanager.dtos.DownlinkRequestDTO
 import com.polito.tesi.measuremanager.dtos.EventCU
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.stereotype.Service
@@ -13,8 +14,26 @@ class KafkaCuProducer(private val kafkaTemplate: KafkaTemplate<String, Any>) {
     }
 
     fun sendPollingUpdate(deviceId: String, event: CUConfigCommandDTO) {
-        // Usiamo deviceId come chiave per garantire l'ordine dei messaggi su Kafka per la stessa CU
-        kafkaTemplate.send("cu-configuration", deviceId, event)
-        println("Sent polling update to Kafka topic: cu-configuration for device $deviceId: $event")
+        // 1. Costruiamo il payload binario: | 0x0A | 0x00 | Polling |
+        val payload = byteArrayOf(
+            0x0A.toByte(),
+            0x00.toByte(),
+            (event.pollingInterval and 0xFF).toByte()
+        )
+
+        // 2. Creiamo il DTO "pulito" per il Sink MQTT
+        val downlinkRequest = DownlinkRequestDTO(
+            deviceId = deviceId,
+            rawPayload = payload,
+            fPort = 15, // Porta standard per la configurazione
+            priority = "NORMAL",
+            confirmed = false
+        )
+
+        // 3. Inviamo al topic collettore
+        // Usiamo deviceId come chiave per garantire l'ordine sequenziale
+        kafkaTemplate.send("ttn-downlink-clean", deviceId, downlinkRequest)
+
+        println("Sent Clean Downlink to Kafka: $downlinkRequest")
     }
 }

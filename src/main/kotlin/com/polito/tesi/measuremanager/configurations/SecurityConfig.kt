@@ -38,8 +38,9 @@ class SecurityConfig {
 
 class CustomJwtGrantedAuthoritiesConverter : Converter<Jwt, Collection<GrantedAuthority>> {
     override fun convert(jwt: Jwt): Collection<GrantedAuthority> {
-        val authorities = mutableListOf<GrantedAuthority>()
 
+        println("DEBUG: Sto convertendo il token per l'utente: ${jwt.subject}")
+        val authorities = mutableListOf<GrantedAuthority>()
         // Estrai le autorità da resource_access.iam1client.roles
         val resourceAccess = jwt.claims["resource_access"] as? Map<*, *>
         val iamClientAccess = resourceAccess?.get("iam1client") as? Map<*, *>

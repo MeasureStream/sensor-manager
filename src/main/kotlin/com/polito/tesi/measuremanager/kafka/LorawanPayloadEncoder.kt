@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.kafka
 
 import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
+import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import org.springframework.stereotype.Component
 import java.io.ByteArrayOutputStream
 
@@ -48,5 +49,20 @@ class LorawanPayloadEncoder {
 
         // Ritorna il payload sulla porta fPort 33 (0x21)
         return EncodedPayload(out.toByteArray(), fPort = 33)
+    }
+
+    /**
+     * Comando 0x0B: Sensor Sampling Update (Fport 0x21)
+     * Costruisce il payload ordinando MU e Sensori come richiesto dal firmware.
+     */
+    fun encodeTransmissionConfig(config: CUTransmissionCommandDTO): EncodedPayload {
+        val out = ByteArrayOutputStream()
+
+        // 1. Identificativo del comando
+        out.write(0x22)
+
+        out.write(config.transmissionIndex and 0xFF)
+        // Ritorna il payload sulla porta fPort 33 (0x21)
+        return EncodedPayload(out.toByteArray(), fPort = 0x22)
     }
 }

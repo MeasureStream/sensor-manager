@@ -36,4 +36,6 @@ interface ControlUnitService {
 
     fun sendSensorSamplingUpdate(command: CUConfigurationDTO) : CUConfigurationDTO
 
+    fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO
+
 }

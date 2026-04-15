@@ -130,7 +130,7 @@ class ControlUnitServiceImpl(
         kcu.sendPollingUpdate(command.deviceId, command)
 
         println("Comando di polling inviato a ${command.deviceId}: ${command.pollingInterval}s")
-        return command;
+        return command
     }
 
     override fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO {
@@ -165,7 +165,7 @@ class ControlUnitServiceImpl(
 
         // 5. Costruzione del Payload Binario per TTN
         val out = java.io.ByteArrayOutputStream()
-        out.write(0x0B.toInt()) // Header: Sensor Config
+        out.write(0x0B) // Header: Sensor Config
         out.write(command.configurations.size) // Quante MU stiamo configurando
 
         command.configurations.forEach { mu ->
@@ -179,23 +179,27 @@ class ControlUnitServiceImpl(
             }
         }
 
-        // 6. Invio al topic collettore per il Sink MQTT
-        // Usiamo il deviceId della CU come chiave Kafka (lo prendiamo dalla Entity recuperata)
-        val downlinkRequest = DownlinkRequestDTO(
-            deviceId = cu.deviceId,
-            rawPayload = out.toByteArray(),
-            fPort = 16,
-            priority = "NORMAL",
-            confirmed = false
-        )
 
-        // 1. Codifica
+
+        // 5. Codifica
         val encoded = encoder.encodeSensorConfig(command)
 
-        // 2. Invio (usa il deviceId recuperato dalla Entity per il routing MQTT)
+        // 6. Invio (usa il deviceId recuperato dalla Entity per il routing MQTT)
         kcu.sendDownlink(cu.deviceId, encoded)
 
         return command
+    }
+
+    override fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO {
+        if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
+        val cu = cur.findByDevEui(command.devEui.toLong())
+            ?: throw EntityNotFoundException("Control Unit con DevEui ${command.devEui} non trovata")
+        cu.transmissionInterval = command.transmissionIndex
+
+        val encoded = encoder.encodeTransmissionConfig(command)
+        kcu.sendDownlink(cu.deviceId, encoded)
+        cur.save(cu)
+        return cu.toCUTransmissionCommandDTO()
     }
 
 

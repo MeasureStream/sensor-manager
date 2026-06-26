@@ -83,6 +83,26 @@ class ControlUnitServiceImpl(
 
     }
 
+    @Transactional
+    override fun updateMetadata(id: Long, newName: String?, newSemanticLocation: String?): ControlUnitDTO {
+        // 1. Recupera la CU tramite ID dal repository
+        val cu = cur.findById(id)
+            .orElseThrow { EntityNotFoundException("Control Unit con ID $id non trovata") }
+
+        // 2. Aggiorna parzialmente solo i metadati passati (se non null)
+        if (newName != null) {
+            if (newName.isBlank()) throw IllegalArgumentException("Il nome non può essere vuoto o composto da soli spazi")
+            cu.name = newName
+        }
+        
+        if (newSemanticLocation != null) {
+            cu.semanticLocation = newSemanticLocation
+        }
+
+        // 3. Salva l'entità e convertila usando la tua funzione .toDTO()
+        return cur.save(cu).toDTO(templateService)
+    }
+
 
     @Transactional
     override fun claimControlUnit(hash: String): ControlUnitDTO {

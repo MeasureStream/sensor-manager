@@ -88,4 +88,21 @@ class ControlUnitController(
             throw e
         }
     }
+
+
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PatchMapping("/metadata", "/metadata/")
+    fun updateMetadata(@Valid @RequestBody dto: CUMetadataUpdateDTO): ControlUnitDTO {
+        log.info("Richiesta PATCH: aggiornamento metadati (nome/locazione) per CU ID {}", dto.id)
+        log.debug("Dati ricevuti per l'aggiornamento metadati: {}", dto)
+
+        try {
+            val updatedCU = cs.updateMetadata(dto.id, dto.name, dto.semanticLocation)
+            log.info("Metadati della CU ID {} aggiornati con successo", dto.id)
+            return updatedCU
+        } catch (e: Exception) {
+            log.error("Errore durante l'aggiornamento metadati per CU ID {}: {}", dto.id, e.message)
+            throw e
+        }
+    }
 }

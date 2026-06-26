@@ -38,4 +38,6 @@ interface ControlUnitService {
 
     fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO
 
+    fun updateMetadata(id: Long, newName: String?, newSemanticLocation: String?): ControlUnitDTO
+
 }

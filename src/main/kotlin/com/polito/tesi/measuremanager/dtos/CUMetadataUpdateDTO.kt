@@ -6,7 +6,6 @@ data class CUMetadataUpdateDTO(
     val id: Long,
     
     @field:Size(min = 1, message = "Il nome non può essere vuoto")
-    val name: String?,
+    val name: String? = null,             
     
-    val semanticLocation: String?
-)
+    val semanticLocation: String? = null   )

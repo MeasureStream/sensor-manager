@@ -92,7 +92,7 @@ class ControlUnitController(
 
 
     @ResponseStatus(HttpStatus.ACCEPTED)
-    @PatchMapping("/metadata", "/metadata/")
+    @PostMapping("/metadata", "/metadata/")
     fun updateMetadata(@Valid @RequestBody dto: CUMetadataUpdateDTO): ControlUnitDTO {
         log.info("Richiesta PATCH: aggiornamento metadati (nome/locazione) per CU ID {}", dto.id)
         log.debug("Dati ricevuti per l'aggiornamento metadati: {}", dto)

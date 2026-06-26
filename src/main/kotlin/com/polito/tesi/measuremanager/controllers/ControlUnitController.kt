@@ -5,6 +5,7 @@ import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.services.ControlUnitService
+import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
 import jakarta.validation.Valid
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus

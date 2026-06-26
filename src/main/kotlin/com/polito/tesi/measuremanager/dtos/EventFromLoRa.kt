@@ -17,6 +17,8 @@ data class CuStatusUpdate(
     val deviceId: String,
     val model: Int,
     val batteryLevel: Int,
+    val ptx: Int,
+    val acPowered: Boolean,
     val isCharging: Boolean,
     val statusRaw: Int
 )

@@ -299,6 +299,7 @@ class ControlUnitServiceImpl(
             // 2. Aggiorna i parametri dinamici (Byte 5 e 6-7 della tabella)
             // Convertiamo il batteryLevel (0-255 o 0-100) nel Double dell'entità
             cu.remainingBattery = c.batteryLevel.toDouble()
+            cu.transmissionPower = c.ptx
 
             // Se hai un campo per lo stato grezzo o per il modello della CU
             // cu.statusRaw = c.statusRaw

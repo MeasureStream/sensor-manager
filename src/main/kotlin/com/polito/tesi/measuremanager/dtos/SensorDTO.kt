@@ -22,9 +22,14 @@ data class SensorDTO(
     val measLocId: Long?,
     val calInitials: String?,
     val sensorTemplate: SensorTemplate, // ← qui metti tutto il template
+    /**
+     * False se il sensore è oltre il limite di MAX_SENSORS_PER_CU (48) per la CU:
+     * resta visibile in UI ma non è configurabile (campionamento forzato a OFF).
+     */
+    val configurable: Boolean = true,
 )
 
-fun Sensor.toDTO(templateService: TemplateService): SensorDTO {
+fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true): SensorDTO {
     val template =
         templateService.getTemplate(this.modelName)
             ?: throw IllegalArgumentException("Template for ${this.modelName} not found")
@@ -47,5 +52,6 @@ fun Sensor.toDTO(templateService: TemplateService): SensorDTO {
         measLocId = this.measLocId,
         calInitials = this.calInitials,
         sensorTemplate = template,
+        configurable = configurable,
     )
 }

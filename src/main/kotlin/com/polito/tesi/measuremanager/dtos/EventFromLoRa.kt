@@ -31,5 +31,11 @@ data class SignalQualityUpdate(
     val airtime: String,
     val time: String,
     val spreadingFactor: Int,
-    val bandwidth : Int
+    val bandwidth : Int,
+    /**
+     * Frame counter LoRaWAN dell'uplink (uplink_message.f_cnt nel JSON TTN).
+     * Default 0: TTN omette il campo quando vale 0 e mantiene la compatibilità
+     * con messaggi prodotti da versioni precedenti di kafka-stream.
+     */
+    val fCnt: Int = 0
 )

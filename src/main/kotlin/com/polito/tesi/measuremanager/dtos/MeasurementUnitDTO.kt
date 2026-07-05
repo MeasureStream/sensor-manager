@@ -17,12 +17,22 @@ data class MeasurementUnitDTO(
     val sensors: List<SensorDTO> = emptyList()
 )
 
-fun MeasurementUnit.toDTO(templateService: TemplateService) = MeasurementUnitDTO(
+/**
+ * @param sensorOffset numero di sensori della stessa CU già contati prima di questa MU
+ * (in ordine di localId): serve a marcare come non configurabili i sensori oltre
+ * il limite di MAX_SENSORS_PER_CU. Con il default 0 (MU fuori dal contesto CU)
+ * tutti i sensori risultano configurabili (max 12 per MU < 48).
+ */
+fun MeasurementUnit.toDTO(templateService: TemplateService, sensorOffset: Int = 0) = MeasurementUnitDTO(
     id = id,
     extendedId = extendedId,
     localId = localId,
     model = model,
     controlUnitId = controlUnit?.id,
-    // Passiamo il servizio alla funzione toDTO di ogni sensore
-    sensors = sensors.map { it.toDTO(templateService) }
+    // Passiamo il servizio alla funzione toDTO di ogni sensore.
+    // I sensori vengono contati in ordine di sensorIndex: quelli oltre il 48° della CU
+    // sono marcati configurable = false.
+    sensors = sensors.sortedBy { it.sensorIndex }.mapIndexed { i, s ->
+        s.toDTO(templateService, configurable = sensorOffset + i < MAX_SENSORS_PER_CU)
+    }
 )

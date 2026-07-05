@@ -7,7 +7,32 @@ import jakarta.validation.constraints.NegativeOrZero
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.PositiveOrZero
 import java.time.LocalDateTime
+import java.time.ZoneOffset
 import org.springframework.data.geo.Point
+
+/**
+ * Soglia minima (in minuti) sotto la quale una CU non viene mai considerata offline,
+ * per tollerare ritardi di rete/TTN anche con intervalli di trasmissione brevi.
+ */
+private const val MIN_OFFLINE_THRESHOLD_MINUTES = 30L
+
+/**
+ * Una CU è online se ha contattato TTN di recente.
+ * "Di recente" = entro 2 volte il transmissionInterval (1 step = 15 min, 255 = 1 min),
+ * con un minimo di [MIN_OFFLINE_THRESHOLD_MINUTES].
+ * NB: lastSeen è salvato come orario UTC (parse del timestamp TTN), quindi il confronto
+ * va fatto con l'ora UTC corrente.
+ */
+fun ControlUnit.isOnline(): Boolean {
+    val seen = lastSeen ?: return false
+    val intervalMinutes = when (transmissionInterval) {
+        in 1..254 -> transmissionInterval * 15L
+        255 -> 1L
+        else -> 0L // trasmissione OFF: resta valida solo la soglia minima
+    }
+    val thresholdMinutes = maxOf(MIN_OFFLINE_THRESHOLD_MINUTES, intervalMinutes * 2)
+    return seen.isAfter(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(thresholdMinutes))
+}
 
 data class ControlUnitDTO(
     val id: Long,
@@ -42,6 +67,9 @@ data class ControlUnitDTO(
     val usedDailyAirtime: Long,
     val lastAirtime: Double,
 
+    /** Ultimo f_cnt LoRaWAN ricevuto da TTN per questa CU (null = mai ricevuto). */
+    val lastFCnt: Int?,
+
     val transmissionInterval: Int,
 
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
@@ -57,7 +85,9 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     remainingBattery = remainingBattery,
     rssi = rssi,
     model = model,
-    status = status,
+    // Stato derivato da lastSeen: unica fonte di verità per landing e pagina di dettaglio.
+    // (il campo status dell'entità non veniva mai aggiornato: restava sempre 0)
+    status = if (isOnline()) 1 else 0,
     dataRate = dataRate,
     usedDC = usedDC,
     hasGPS = hasGPS,
@@ -76,6 +106,16 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     lastAirtime = lastAirtime,
     transmissionInterval = transmissionInterval,
 
-    // Mappiamo solo gli ID delle MU collegate
-    measurementUnits = measurementUnits.map { it.toDTO(templateService) }
+    lastFCnt = lastFCnt,
+
+    // MU in ordine di localId, contando i sensori in modo cumulativo:
+    // i sensori oltre MAX_SENSORS_PER_CU (48) vengono marcati configurable = false
+    measurementUnits = run {
+        var sensorOffset = 0
+        measurementUnits.sortedBy { it.localId }.map { mu ->
+            val dto = mu.toDTO(templateService, sensorOffset)
+            sensorOffset += mu.sensors.size
+            dto
+        }
+    }
 )

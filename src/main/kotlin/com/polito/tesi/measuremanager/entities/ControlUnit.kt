@@ -76,4 +76,12 @@ class ControlUnit {
     var usedDailyAirtime: Long = 0 //dato in ms
 
     var lastAirtime: Double = 0.0 // dato in secondi
+
+    /**
+     * Ultimo frame counter (f_cnt) LoRaWAN ricevuto da TTN per questa CU.
+     * Serve per i controlli di continuità/integrità dei messaggi
+     * (salti di f_cnt = pacchetti persi; f_cnt più basso = reset/rejoin della CU).
+     * null = nessun uplink ancora ricevuto.
+     */
+    var lastFCnt: Int? = null
 }

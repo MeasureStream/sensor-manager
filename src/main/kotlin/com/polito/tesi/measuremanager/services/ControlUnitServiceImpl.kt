@@ -162,8 +162,40 @@ class ControlUnitServiceImpl(
         val cu = cur.findByDevEui(command.devEui.toLong())
             ?: throw EntityNotFoundException("Control Unit con DevEui ${command.devEui} non trovata")
 
+        // 2b. Enforcement del limite MAX_SENSORS_PER_CU (48):
+        // ricostruiamo l'insieme dei sensori configurabili con lo stesso ordinamento
+        // usato nei DTO (MU per localId, sensori per sensorIndex) e forziamo a OFF (0)
+        // il periodo di campionamento di qualunque sensore oltre la soglia,
+        // qualunque cosa arrivi dal client.
+        val configurableKeys = buildSet {
+            var count = 0
+            cu.measurementUnits.sortedBy { it.localId }.forEach { mu ->
+                mu.sensors.sortedBy { it.sensorIndex }.forEach { s ->
+                    if (count < MAX_SENSORS_PER_CU) add(mu.localId to s.sensorIndex)
+                    count++
+                }
+            }
+        }
+        val safeCommand = command.copy(
+            configurations = command.configurations.map { muCfg ->
+                muCfg.copy(
+                    sensors = muCfg.sensors.map { sCfg ->
+                        if ((muCfg.localId to sCfg.sensorIndex) in configurableKeys) {
+                            sCfg
+                        } else {
+                            println(
+                                "Sensore MU=${muCfg.localId}/idx=${sCfg.sensorIndex} oltre il limite di " +
+                                    "$MAX_SENSORS_PER_CU sensori per CU: campionamento forzato a OFF"
+                            )
+                            sCfg.copy(samplingPeriod = 0)
+                        }
+                    }
+                )
+            }
+        )
+
         // 3. Update dei valori nel Database
-        command.configurations.forEach { muConfig ->
+        safeCommand.configurations.forEach { muConfig ->
             // Cerchiamo la MU all'interno della CU
             val muEntity = cu.measurementUnits.find { it.localId == muConfig.localId }
 
@@ -183,31 +215,13 @@ class ControlUnitServiceImpl(
         // 4. Salvataggio persistente
         cur.save(cu)
 
-        // 5. Costruzione del Payload Binario per TTN
-        val out = java.io.ByteArrayOutputStream()
-        out.write(0x0B) // Header: Sensor Config
-        out.write(command.configurations.size) // Quante MU stiamo configurando
-
-        command.configurations.forEach { mu ->
-            out.write(mu.localId)           // Indirizzo MU
-            out.write(mu.sensors.size)      // Numero sensori in questa MU
-
-            mu.sensors.forEach { sensor ->
-                out.write(sensor.sensorIndex)
-                // Scriviamo il periodo (assumendo stia in 1 byte, 0-255s)
-                out.write(sensor.samplingPeriod and 0xFF)
-            }
-        }
-
-
-
         // 5. Codifica
-        val encoded = encoder.encodeSensorConfig(command)
+        val encoded = encoder.encodeSensorConfig(safeCommand)
 
         // 6. Invio (usa il deviceId recuperato dalla Entity per il routing MQTT)
         kcu.sendDownlink(cu.deviceId, encoded)
 
-        return command
+        return safeCommand
     }
 
     override fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO {
@@ -370,10 +384,23 @@ class ControlUnitServiceImpl(
         cu.lastAirtime = airtimeSeconds
         cu.usedDailyAirtime += (airtimeSeconds * 1000).toInt()
 
+        // Frame counter LoRaWAN: controllo di continuità e persistenza.
+        // f_cnt che salta valori = uplink persi; f_cnt più basso del precedente = reset/rejoin della CU.
+        val previousFCnt = cu.lastFCnt
+        if (previousFCnt != null) {
+            when {
+                dto.fCnt > previousFCnt + 1 ->
+                    println("ATTENZIONE CU ${cu.name}: persi ${dto.fCnt - previousFCnt - 1} uplink (f_cnt $previousFCnt -> ${dto.fCnt})")
+                dto.fCnt <= previousFCnt ->
+                    println("CU ${cu.name}: f_cnt ripartito da ${dto.fCnt} (era $previousFCnt), probabile reset/rejoin")
+            }
+        }
+        cu.lastFCnt = dto.fCnt
+
         // 4. Salvataggio
         cur.save(cu)
 
-        println("Aggiornato segnale per CU ${cu.name} [EUI: ${dto.devEUI}]: RSSI=${cu.rssi}, DR=${cu.dataRate}")
+        println("Aggiornato segnale per CU ${cu.name} [EUI: ${dto.devEUI}]: RSSI=${cu.rssi}, DR=${cu.dataRate}, f_cnt=${dto.fCnt}")
     }
 
 

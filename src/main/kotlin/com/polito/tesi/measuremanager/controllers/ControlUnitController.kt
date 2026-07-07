@@ -9,6 +9,7 @@ import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
 import jakarta.validation.Valid
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -23,6 +24,18 @@ class ControlUnitController(
     fun get(@RequestParam name: String?): List<ControlUnitDTO> {
         log.info("Richiesta GET per le Control Units (filtro nome: {})", name ?: "nessuno")
         return cs.getAllControlUnits(name = name)
+    }
+
+    // --- NEL TUO ControlUnitController.kt ---
+
+    @GetMapping("/{id}")
+    fun getById(@PathVariable id: Long): ResponseEntity<ControlUnitDTO> {
+        log.info("Richiesta GET per singola Control Unit con ID {}", id)
+        
+        val controlUnit = cs.getControlUnit(id) 
+            ?: return ResponseEntity.notFound().build()
+            
+        return ResponseEntity.ok(controlUnit)
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)

@@ -334,6 +334,8 @@ class ControlUnitServiceImpl(
             // Convertiamo il batteryLevel (0-255 o 0-100) nel Double dell'entità
             cu.remainingBattery = c.batteryLevel.toDouble()
             cu.transmissionPower = c.ptx
+            cu.acPowered = c.acPowered
+            cu.isCharging = c.isCharging
 
             // Se hai un campo per lo stato grezzo o per il modello della CU
             // cu.statusRaw = c.statusRaw

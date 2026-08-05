@@ -25,6 +25,9 @@ class ControlUnit {
     @Max(100)
     var remainingBattery: Double = 0.0
 
+    var acPowered: Boolean =false
+    var isCharging: Boolean = false
+
     @NegativeOrZero(message = "rssi must be negative")
     var rssi: Double = 0.0
 

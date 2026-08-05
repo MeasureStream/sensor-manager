@@ -43,6 +43,8 @@ data class ControlUnitDTO(
     @field:PositiveOrZero
     @field:Max(value = 100, message = "Remaining battery must be under 100")
     val remainingBattery: Double,
+    val acPowered : Boolean,
+    val isCharging : Boolean,
     @field:NegativeOrZero(message = "RSSI must be negative")
     val rssi: Double,
     val model: Int,
@@ -83,6 +85,8 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     deviceId = deviceId,
     name = name,
     remainingBattery = remainingBattery,
+    acPowered = acPowered,
+    isCharging = isCharging,
     rssi = rssi,
     model = model,
     // Stato derivato da lastSeen: unica fonte di verità per landing e pagina di dettaglio.

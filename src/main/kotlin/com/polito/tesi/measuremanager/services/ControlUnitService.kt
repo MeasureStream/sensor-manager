@@ -8,12 +8,12 @@ interface ControlUnitService {
     fun getControlUnit(id: Long): ControlUnitDTO?
 
     fun getAllControlUnits(
-        name: String?,
+            name: String?,
     ): List<ControlUnitDTO>
 
     fun getAllControlUnitsPage(
-        page: Pageable,
-        name: String?,
+            page: Pageable,
+            name: String?,
     ): Page<ControlUnitDTO>
 
     fun claimControlUnit(hash: String): ControlUnitDTO
@@ -22,22 +22,22 @@ interface ControlUnitService {
 
     fun onStatusUpdate(c: CuStatusUpdate)
 
-    fun onSignalUpdate(dto : SignalQualityUpdate)
-
+    fun onSignalUpdate(dto: SignalQualityUpdate)
 
     fun update(
-        id: Long,
-        c: ControlUnitDTO,
+            id: Long,
+            c: ControlUnitDTO,
     ): ControlUnitDTO
 
     fun delete(id: Long)
 
-    fun sendPollingUpdate(c : CUConfigCommandDTO) : CUConfigCommandDTO?
+    fun sendPollingUpdate(c: CUConfigCommandDTO): CUConfigCommandDTO?
 
-    fun sendSensorSamplingUpdate(command: CUConfigurationDTO) : CUConfigurationDTO
+    fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO
 
     fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO
 
     fun updateMetadata(id: Long, newName: String?, newSemanticLocation: String?): ControlUnitDTO
 
+    fun updateMeasureConfig(dto: MeasureCUConfigRequest): MeasureCUConfigRequest
 }

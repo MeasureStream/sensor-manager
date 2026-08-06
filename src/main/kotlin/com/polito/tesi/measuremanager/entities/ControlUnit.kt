@@ -7,84 +7,67 @@ import org.springframework.data.geo.Point
 
 @Entity
 class ControlUnit {
-    @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
-    var id: Long = 0
+    @Id @GeneratedValue(strategy = GenerationType.AUTO) var id: Long = 0
 
     var model: Int = 0
 
     lateinit var deviceId: String
 
-    @Column(unique = true, nullable = false)
-    var devEui: Long = 0
+    @Column(unique = true, nullable = false) var devEui: Long = 0
 
-    @NotBlank(message = "name is mandatory")
-    lateinit var name: String
+    @NotBlank(message = "name is mandatory") lateinit var name: String
 
-    @PositiveOrZero
-    @Max(100)
-    var remainingBattery: Double = 0.0
+    @PositiveOrZero @Max(100) var remainingBattery: Double = 0.0
 
-    var acPowered: Boolean =false
+    var acPowered: Boolean = false
     var isCharging: Boolean = false
 
-    @NegativeOrZero(message = "rssi must be negative")
-    var rssi: Double = 0.0
+    @NegativeOrZero(message = "rssi must be negative") var rssi: Double = 0.0
 
     var location: Point? = null
 
-    @ManyToOne
-    var user: User? = null
+    @ManyToOne var user: User? = null
 
     var status: Int = 0
 
     var dataRate: Int = 0
-    var usedDC : Int = 0
-    var hasGPS : Boolean = false
-    var MaxMU : Int = 0
+    var usedDC: Int = 0
+    var hasGPS: Boolean = false
+    var MaxMU: Int = 0
 
     @OneToMany(mappedBy = "controlUnit")
     var measurementUnits: MutableList<MeasurementUnit> = mutableListOf()
 
-
-    /**
-     * Corrisponde a Setting1 (Byte 1).
-     * Gestito come Int per facilitare operazioni bitwise.
-     */
+    /** Corrisponde a Setting1 (Byte 1). Gestito come Int per facilitare operazioni bitwise. */
     var setting1: Int = 0
 
-    /**
-     * Corrisponde a P_TX (Byte 2).
-     * Potenza di trasmissione.
-     */
+    /** Corrisponde a P_TX (Byte 2). Potenza di trasmissione. */
     var transmissionPower: Int = 0
 
-    /**
-     * Corrisponde a Delta T_Polling (Byte 3).
-     * Periodo tra due messaggi di stato.
-     */
+    /** Corrisponde a Delta T_Polling (Byte 3). Periodo tra due messaggi di stato. */
     var pollingInterval: Int = 0
 
     var transmissionInterval: Int = 0
 
-    var semanticLocation : String = ""
+    var semanticLocation: String = ""
     var bandwidth: Int = 0
     var spreadingFactor: Int = 0
     var codingRate: String = ""
     var frequency: Int = 0
 
-    //data ultimo pacchetto arrivato
+    // data ultimo pacchetto arrivato
     var lastSeen: LocalDateTime? = null
 
-    var usedDailyAirtime: Long = 0 //dato in ms
+    var usedDailyAirtime: Long = 0 // dato in ms
 
     var lastAirtime: Double = 0.0 // dato in secondi
 
     /**
-     * Ultimo frame counter (f_cnt) LoRaWAN ricevuto da TTN per questa CU.
-     * Serve per i controlli di continuità/integrità dei messaggi
-     * (salti di f_cnt = pacchetti persi; f_cnt più basso = reset/rejoin della CU).
-     * null = nessun uplink ancora ricevuto.
+     * Ultimo frame counter (f_cnt) LoRaWAN ricevuto da TTN per questa CU. Serve per i controlli di
+     * continuità/integrità dei messaggi (salti di f_cnt = pacchetti persi; f_cnt più basso =
+     * reset/rejoin della CU). null = nessun uplink ancora ricevuto.
      */
     var lastFCnt: Int? = null
+
+    var configVersion: Long = 0
 }

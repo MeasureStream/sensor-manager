@@ -2,10 +2,11 @@ package com.polito.tesi.measuremanager.controllers
 
 import com.polito.tesi.measuremanager.dtos.CUConfigCommandDTO
 import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
-import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
-import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
-import com.polito.tesi.measuremanager.services.ControlUnitService
 import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
+import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
+import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
+import com.polito.tesi.measuremanager.dtos.MeasureCUConfigRequest
+import com.polito.tesi.measuremanager.services.ControlUnitService
 import jakarta.validation.Valid
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -15,7 +16,7 @@ import org.springframework.web.bind.annotation.*
 @RestController
 @RequestMapping("/API/controlunits")
 class ControlUnitController(
-    private val cs: ControlUnitService,
+        private val cs: ControlUnitService,
 ) {
     // Logger istanziato per questa classe
     private val log = LoggerFactory.getLogger(javaClass)
@@ -31,10 +32,9 @@ class ControlUnitController(
     @GetMapping("/{id}")
     fun getById(@PathVariable id: Long): ResponseEntity<ControlUnitDTO> {
         log.info("Richiesta GET per singola Control Unit con ID {}", id)
-        
-        val controlUnit = cs.getControlUnit(id) 
-            ?: return ResponseEntity.notFound().build()
-            
+
+        val controlUnit = cs.getControlUnit(id) ?: return ResponseEntity.notFound().build()
+
         return ResponseEntity.ok(controlUnit)
     }
 
@@ -62,7 +62,11 @@ class ControlUnitController(
             cs.sendPollingUpdate(command)
             log.info("Comando polling inviato al service con successo")
         } catch (e: Exception) {
-            log.error("Errore durante la configurazione polling per {}: {}", command.devEui, e.message)
+            log.error(
+                    "Errore durante la configurazione polling per {}: {}",
+                    command.devEui,
+                    e.message
+            )
             throw e
         }
     }
@@ -83,8 +87,8 @@ class ControlUnitController(
     }
 
     /**
-     * ENDPOINT: START/STOP TRASMISSIONE
-     * Gestisce l'avvio e l'arresto della sessione live dei sensori
+     * ENDPOINT: START/STOP TRASMISSIONE Gestisce l'avvio e l'arresto della sessione live dei
+     * sensori
      */
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/transmission", "/transmission/")
@@ -103,7 +107,6 @@ class ControlUnitController(
         }
     }
 
-
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/metadata", "/metadata/")
     fun updateMetadata(@Valid @RequestBody dto: CUMetadataUpdateDTO): ControlUnitDTO {
@@ -118,5 +121,12 @@ class ControlUnitController(
             log.error("Errore durante l'aggiornamento metadati per CU ID {}: {}", dto.id, e.message)
             throw e
         }
+    }
+
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PostMapping("/measureconfig", "/measureconfig/")
+    fun updateMeasureConfig(@RequestBody dto: MeasureCUConfigRequest): MeasureCUConfigRequest {
+
+        return dto
     }
 }

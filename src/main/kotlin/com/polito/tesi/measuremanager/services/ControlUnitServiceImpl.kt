@@ -489,7 +489,6 @@ class ControlUnitServiceImpl(
 
     @Transactional
     override fun onMeasuresUpdate(dto: CuMeasuresUpdate) {
-        // 1. Recupero della Control Unit dal DB
         val c =
                 cur.findByDevEui(dto.devEui)
                         ?: run {
@@ -507,7 +506,6 @@ class ControlUnitServiceImpl(
             return
         }
 
-        // 2. Controllo e decodifica Base64 del payload
         if (dto.rawPayload.isBlank()) {
             log.warn("Payload vuoto ricevuto per DevEUI={}", dto.devEui)
             return
@@ -521,27 +519,26 @@ class ControlUnitServiceImpl(
                     return
                 }
 
-        // 3. Preparazione del ByteBuffer per la lettura binaria
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
 
-        // 4. Estrazione dei sensori ordinati per LocalID (MU) e SensorIndex
+        // Ordinamento garantito: LocalID della MU, poi SensorIndex
         val sortedSensors =
                 c.measurementUnits.sortedBy { it.localId }.flatMap { mu ->
                     mu.sensors.sortedBy { it.sensorIndex }.map { sensor -> Pair(mu, sensor) }
                 }
 
-        val decodedMeasures = mutableListOf<Map<String, Any>>()
+        val decodedMeasures = mutableListOf<Map<String, Any?>>()
 
-        // 5. Scansione del payload byte per byte in base al configType
         for ((mu, sensor) in sortedSensors) {
-            val configType =
-                    sensor.configurationMeasure // "avg-std", "integral", "max-min", "puntual"
+            // Fallback di sicurezza su configurationMeasure
+            val configType = sensor.configurationMeasure?.lowercase() ?: "average-std"
 
+            // Calcolo byte richiesti in base a configType
             val bytesRequired =
                     when (configType) {
-                        "avg-std", "max-min" -> 4
+                        "avg-std", "average-std", "max-min" -> 4
                         "integral", "puntual" -> 2
-                        else -> 2 // fallback di sicurezza
+                        else -> 2
                     }
 
             if (buffer.remaining() < bytesRequired) {
@@ -555,72 +552,49 @@ class ControlUnitServiceImpl(
             }
 
             val measureData =
-                    mutableMapOf<String, Any>(
+                    mutableMapOf<String, Any?>(
                             "muLocalId" to mu.localId,
                             "muExtendedId" to mu.extendedId,
                             "sensorId" to sensor.id,
                             "sensorIndex" to sensor.sensorIndex,
+                            "modelName" to sensor.modelName,
                             "configType" to configType
                     )
 
-            // Estrazione dinamica in base al tipo di misura
             when (configType) {
-                "avg-std" -> {
-                    val avg = buffer.short.toInt()
-                    val std = buffer.short.toInt()
-                    measureData["avg"] = avg
-                    measureData["std"] = std
+                "avg-std", "average-std" -> {
+                    // In Kotlin/Java .short da signed value; con & 0xFFFF lo rendiamo uint16 puro
+                    // (0..65535)
+                    val rawMean = buffer.short.toInt() and 0xFFFF
+                    val rawVar = buffer.short.toInt() and 0xFFFF
+
+                    // DECODIFICA FISICA TRAMITE SENSOR DECODER
+                    val decoded = SensorDecoder.decode(sensor.modelName, rawMean, rawVar)
+
+                    measureData["status"] = decoded.status
+                    measureData["rawMean"] = rawMean
+                    measureData["rawVar"] = rawVar
+                    measureData["physicalValue"] = decoded.physicalValue
+                    measureData["physicalVariance"] = decoded.physicalVariance
+
                     log.debug(
-                            "Sensore [MU:{}, Sensor:{}] (avg-std) -> Avg: {}, Std: {}",
+                            "Sensore [MU:{}, Model:{}] -> Status: {}, PhysVal: {}, PhysVar: {}",
                             mu.localId,
-                            sensor.id,
-                            avg,
-                            std
+                            sensor.modelName,
+                            decoded.status,
+                            decoded.physicalValue,
+                            decoded.physicalVariance
                     )
                 }
                 "max-min" -> {
-                    val max = buffer.short.toInt()
-                    val min = buffer.short.toInt()
-                    measureData["max"] = max
-                    measureData["min"] = min
-                    log.debug(
-                            "Sensore [MU:{}, Sensor:{}] (max-min) -> Max: {}, Min: {}",
-                            mu.localId,
-                            sensor.id,
-                            max,
-                            min
-                    )
+                    val rawMax = buffer.short.toInt() and 0xFFFF
+                    val rawMin = buffer.short.toInt() and 0xFFFF
+                    measureData["rawMax"] = rawMax
+                    measureData["rawMin"] = rawMin
                 }
-                "integral" -> {
-                    val value = buffer.short.toInt()
-                    measureData["value"] = value
-                    log.debug(
-                            "Sensore [MU:{}, Sensor:{}] (integral) -> Valore: {}",
-                            mu.localId,
-                            sensor.id,
-                            value
-                    )
-                }
-                "puntual" -> {
-                    val value = buffer.short.toInt()
-                    measureData["value"] = value
-                    log.debug(
-                            "Sensore [MU:{}, Sensor:{}] (puntual) -> Valore: {}",
-                            mu.localId,
-                            sensor.id,
-                            value
-                    )
-                }
-                else -> {
-                    val value = buffer.short.toInt()
-                    measureData["value"] = value
-                    log.debug(
-                            "Sensore [MU:{}, Sensor:{}] ({}) -> Valore: {}",
-                            mu.localId,
-                            sensor.id,
-                            configType,
-                            value
-                    )
+                "integral", "puntual" -> {
+                    val rawVal = buffer.short.toInt() and 0xFFFF
+                    measureData["rawValue"] = rawVal
                 }
             }
 
@@ -629,7 +603,7 @@ class ControlUnitServiceImpl(
 
         log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)
 
-        // TODO: Salva decodedMeasures nel database o inviale al relativo repository
+        // TODO: Salva decodedMeasures nel database (es. TimeScale/InfluxDB/PostgreSQL)
     }
     /**
      * Funzione di supporto per garantire l'idempotenza: Se la CU esiste la restituisce, altrimenti

@@ -18,11 +18,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.LocalDateTime
 import java.util.Base64
+import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
-import org.slf4j.LoggerFactory
 
 @Service
 class ControlUnitServiceImpl(
@@ -496,8 +496,14 @@ class ControlUnitServiceImpl(
                             log.warn("Control Unit non trovata per DevEUI={}", dto.devEui)
                             return
                         }
-        if(dto.configVersion.toLong() != c.configVersion){
-            log.warn("Attenzione arrivato config version differente per cu deveui= {} arrivato={} expected={}", dto.devEui,dto.configVersion, c.configVersion )
+
+        if (dto.configVersion.toLong() != c.configVersion) {
+            log.warn(
+                    "Attenzione: arrivata configVersion differente per CU devEUI={}. Ricevuta={}, Attesa={}",
+                    dto.devEui,
+                    dto.configVersion,
+                    c.configVersion
+            )
             return
         }
 
@@ -526,12 +532,17 @@ class ControlUnitServiceImpl(
 
         val decodedMeasures = mutableListOf<Map<String, Any>>()
 
-        // 5. Scansione del payload byte per byte
+        // 5. Scansione del payload byte per byte in base al configType
         for ((mu, sensor) in sortedSensors) {
             val configType =
                     sensor.configurationMeasure // "avg-std", "integral", "max-min", "puntual"
-            val isIntegral = configType == "integral"
-            val bytesRequired = if (isIntegral) 2 else 4
+
+            val bytesRequired =
+                    when (configType) {
+                        "avg-std", "max-min" -> 4
+                        "integral", "puntual" -> 2
+                        else -> 2 // fallback di sicurezza
+                    }
 
             if (buffer.remaining() < bytesRequired) {
                 log.warn(
@@ -543,32 +554,77 @@ class ControlUnitServiceImpl(
                 break
             }
 
-            // Estrazione valore (2B per integral, 4B float per altri)
-            val value: Number =
-                    if (isIntegral) {
-                        buffer.short.toInt()
-                    } else {
-                        buffer.float
-                    }
-
-            decodedMeasures.add(
-                    mapOf(
+            val measureData =
+                    mutableMapOf<String, Any>(
                             "muLocalId" to mu.localId,
                             "muExtendedId" to mu.extendedId,
                             "sensorId" to sensor.id,
                             "sensorIndex" to sensor.sensorIndex,
-                            "configType" to configType,
-                            "value" to value
+                            "configType" to configType
                     )
-            )
 
-            log.debug(
-                    "Sensore [MU:{}, Sensor:{}] ({}) -> Valore: {}",
-                    mu.localId,
-                    sensor.id,
-                    configType,
-                    value
-            )
+            // Estrazione dinamica in base al tipo di misura
+            when (configType) {
+                "avg-std" -> {
+                    val avg = buffer.short.toInt()
+                    val std = buffer.short.toInt()
+                    measureData["avg"] = avg
+                    measureData["std"] = std
+                    log.debug(
+                            "Sensore [MU:{}, Sensor:{}] (avg-std) -> Avg: {}, Std: {}",
+                            mu.localId,
+                            sensor.id,
+                            avg,
+                            std
+                    )
+                }
+                "max-min" -> {
+                    val max = buffer.short.toInt()
+                    val min = buffer.short.toInt()
+                    measureData["max"] = max
+                    measureData["min"] = min
+                    log.debug(
+                            "Sensore [MU:{}, Sensor:{}] (max-min) -> Max: {}, Min: {}",
+                            mu.localId,
+                            sensor.id,
+                            max,
+                            min
+                    )
+                }
+                "integral" -> {
+                    val value = buffer.short.toInt()
+                    measureData["value"] = value
+                    log.debug(
+                            "Sensore [MU:{}, Sensor:{}] (integral) -> Valore: {}",
+                            mu.localId,
+                            sensor.id,
+                            value
+                    )
+                }
+                "puntual" -> {
+                    val value = buffer.short.toInt()
+                    measureData["value"] = value
+                    log.debug(
+                            "Sensore [MU:{}, Sensor:{}] (puntual) -> Valore: {}",
+                            mu.localId,
+                            sensor.id,
+                            value
+                    )
+                }
+                else -> {
+                    val value = buffer.short.toInt()
+                    measureData["value"] = value
+                    log.debug(
+                            "Sensore [MU:{}, Sensor:{}] ({}) -> Valore: {}",
+                            mu.localId,
+                            sensor.id,
+                            configType,
+                            value
+                    )
+                }
+            }
+
+            decodedMeasures.add(measureData)
         }
 
         log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)

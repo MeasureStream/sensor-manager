@@ -487,6 +487,7 @@ class ControlUnitServiceImpl(
         return dto
     }
 
+    @Transactional
     override fun onMeasuresUpdate(dto: CuMeasuresUpdate) {
         // 1. Recupero della Control Unit dal DB
         val c =

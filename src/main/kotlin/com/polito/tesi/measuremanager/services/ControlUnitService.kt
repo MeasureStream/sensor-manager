@@ -40,4 +40,6 @@ interface ControlUnitService {
     fun updateMetadata(id: Long, newName: String?, newSemanticLocation: String?): ControlUnitDTO
 
     fun updateMeasureConfig(dto: MeasureCUConfigRequest): MeasureCUConfigRequest
+
+    fun onMeasuresUpdate(dto: CuMeasuresUpdate)
 }

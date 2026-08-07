@@ -127,6 +127,6 @@ class ControlUnitController(
     @PostMapping("/measureconfig", "/measureconfig/")
     fun updateMeasureConfig(@RequestBody dto: MeasureCUConfigRequest): MeasureCUConfigRequest {
 
-        return dto
+        return cs.updateMeasureConfig(dto)
     }
 }

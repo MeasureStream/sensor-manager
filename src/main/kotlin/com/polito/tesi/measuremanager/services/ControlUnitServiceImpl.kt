@@ -14,11 +14,15 @@ import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.time.LocalDateTime
+import java.util.Base64
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
+import org.slf4j.LoggerFactory
 
 @Service
 class ControlUnitServiceImpl(
@@ -29,6 +33,8 @@ class ControlUnitServiceImpl(
         private val templateService: TemplateService,
         private val encoder: LorawanPayloadEncoder,
 ) : ControlUnitService {
+
+    private val log = LoggerFactory.getLogger(ControlUnitServiceImpl::class.java)
 
     override fun getAllControlUnits(
             name: String?,
@@ -479,6 +485,94 @@ class ControlUnitServiceImpl(
 
         // 6. Restituisci il risultato
         return dto
+    }
+
+    override fun onMeasuresUpdate(dto: CuMeasuresUpdate) {
+        // 1. Recupero della Control Unit dal DB
+        val c =
+                cur.findByDevEui(dto.devEui)
+                        ?: run {
+                            log.warn("Control Unit non trovata per DevEUI={}", dto.devEui)
+                            return
+                        }
+        if(dto.configVersion.toLong() != c.configVersion){
+            log.warn("Attenzione arrivato config version differente per cu deveui= {} arrivato={} expected={}", dto.devEui,dto.configVersion, c.configVersion )
+            return
+        }
+
+        // 2. Controllo e decodifica Base64 del payload
+        if (dto.rawPayload.isBlank()) {
+            log.warn("Payload vuoto ricevuto per DevEUI={}", dto.devEui)
+            return
+        }
+
+        val bytes =
+                try {
+                    Base64.getDecoder().decode(dto.rawPayload)
+                } catch (e: Exception) {
+                    log.error("Errore decodifica Base64 per DevEUI={}: {}", dto.devEui, e.message)
+                    return
+                }
+
+        // 3. Preparazione del ByteBuffer per la lettura binaria
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
+
+        // 4. Estrazione dei sensori ordinati per LocalID (MU) e SensorIndex
+        val sortedSensors =
+                c.measurementUnits.sortedBy { it.localId }.flatMap { mu ->
+                    mu.sensors.sortedBy { it.sensorIndex }.map { sensor -> Pair(mu, sensor) }
+                }
+
+        val decodedMeasures = mutableListOf<Map<String, Any>>()
+
+        // 5. Scansione del payload byte per byte
+        for ((mu, sensor) in sortedSensors) {
+            val configType =
+                    sensor.configurationMeasure // "avg-std", "integral", "max-min", "puntual"
+            val isIntegral = configType == "integral"
+            val bytesRequired = if (isIntegral) 2 else 4
+
+            if (buffer.remaining() < bytesRequired) {
+                log.warn(
+                        "Payload incompleto per DevEUI={}. Byte richiesti: {}, rimasti: {}",
+                        dto.devEui,
+                        bytesRequired,
+                        buffer.remaining()
+                )
+                break
+            }
+
+            // Estrazione valore (2B per integral, 4B float per altri)
+            val value: Number =
+                    if (isIntegral) {
+                        buffer.short.toInt()
+                    } else {
+                        buffer.float
+                    }
+
+            decodedMeasures.add(
+                    mapOf(
+                            "muLocalId" to mu.localId,
+                            "muExtendedId" to mu.extendedId,
+                            "sensorId" to sensor.id,
+                            "sensorIndex" to sensor.sensorIndex,
+                            "configType" to configType,
+                            "value" to value
+                    )
+            )
+
+            log.debug(
+                    "Sensore [MU:{}, Sensor:{}] ({}) -> Valore: {}",
+                    mu.localId,
+                    sensor.id,
+                    configType,
+                    value
+            )
+        }
+
+        log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)
+
+        // TODO: Salva decodedMeasures nel database o inviale al relativo repository
     }
     /**
      * Funzione di supporto per garantire l'idempotenza: Se la CU esiste la restituisce, altrimenti

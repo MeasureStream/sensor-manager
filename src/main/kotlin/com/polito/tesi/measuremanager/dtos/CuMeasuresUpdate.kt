@@ -4,8 +4,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CuMeasuresUpdate(
-        val devEui: Long = 0L,
-        val deviceId: String = "",
-        val configVersion: Int = 0,
-        val rawPayload: String = ""
+        val devEui: Long,
+        val deviceId: String,
+        val configVersion: Int,
+        val rawPayload: String,
+        val timestamp: String?
 )

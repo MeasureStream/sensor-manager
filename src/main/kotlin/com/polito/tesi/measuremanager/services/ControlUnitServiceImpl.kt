@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.entities.ControlUnit
+import com.polito.tesi.measuremanager.entities.Measurement
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
@@ -9,26 +10,29 @@ import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
+import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.template.TemplateService
+import com.polito.tesi.measuremanager.utils.SensorDecoder
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.util.Base64
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
-import com.polito.tesi.measuremanager.utils.SensorDecoder
 
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
         private val mur: MeasurementUnitRepository,
+        private val measurementRepository: MeasurementRepository,
         private val ss: SecurityService,
         private val kcu: KafkaCuProducer,
         private val templateService: TemplateService,
@@ -604,7 +608,42 @@ class ControlUnitServiceImpl(
 
         log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)
 
-        // TODO: Salva decodedMeasures nel database (es. TimeScale/InfluxDB/PostgreSQL)
+        val measurementsToSave =
+                decodedMeasures.mapNotNull { data ->
+                    val sensor = data["sensorEntity"] as? Sensor ?: return@mapNotNull null
+                    val configType = data["configType"] as? String ?: return@mapNotNull null
+
+                    val timestamp =
+                            dto.timestamp?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
+
+                    var primary: Double? = null
+                    var secondary: Double? = null
+
+                    when (configType) {
+                        "avg-std", "average-std" -> {
+                            primary = (data["physicalValue"] as? Number)?.toDouble()
+                            secondary = (data["physicalVariance"] as? Number)?.toDouble()
+                        }
+                        "max-min" -> {
+                            primary = (data["rawMax"] as? Number)?.toDouble()
+                            secondary = (data["rawMin"] as? Number)?.toDouble()
+                        }
+                        "integral", "puntual" -> {
+                            primary = (data["rawValue"] as? Number)?.toDouble()
+                        }
+                    }
+
+                    Measurement(
+                            timestamp = timestamp,
+                            sensor = sensor,
+                            measurementType = configType, // <-- Assegnato qui
+                            valuePrimary = primary,
+                            valueSecondary = secondary
+                    )
+                }
+
+        measurementRepository.saveAll(measurementsToSave)
+        log.info("Misure salvate nel DB")
     }
     /**
      * Funzione di supporto per garantire l'idempotenza: Se la CU esiste la restituisce, altrimenti

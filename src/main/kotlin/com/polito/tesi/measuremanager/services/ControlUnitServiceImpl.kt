@@ -563,7 +563,8 @@ class ControlUnitServiceImpl(
                             "sensorId" to sensor.id,
                             "sensorIndex" to sensor.sensorIndex,
                             "modelName" to sensor.modelName,
-                            "configType" to configType
+                            "configType" to configType,
+                            "sensorEntity" to sensor
                     )
 
             when (configType) {

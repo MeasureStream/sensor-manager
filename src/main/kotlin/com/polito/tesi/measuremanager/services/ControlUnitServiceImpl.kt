@@ -298,14 +298,14 @@ class ControlUnitServiceImpl(
 
         when (model) {
             1 -> {
-                addSensor("accelerometer_lsm6dsm", 1)
-                addSensor("pressure_ms5837", 2)
-                addSensor("humidity_hpp845e", 3)
-                addSensor("ntc_temperature", 4)
+                addSensor("AccelerometerLSM6DSM", 1)
+                addSensor("PressureSensorMS5837", 2)
+                addSensor("HumiditySensorHTU21D", 3)
+                addSensor("TemperatureSensorNTC", 4)
             }
             100 -> {
-                addSensor("accelerometer_lsm6dsm", 1)
-                addSensor("ntc_temperature", 2)
+                addSensor("AccelerometerLSM6DSM", 1)
+                addSensor("TemperatureSensorNTC", 2)
             }
             else -> throw OperationNotAllowed("Model $model not supported")
         }

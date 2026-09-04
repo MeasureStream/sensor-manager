@@ -5,6 +5,7 @@ import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.Measurement
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Sensor
+import com.polito.tesi.measuremanager.entities.SignalQuality
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
@@ -12,6 +13,7 @@ import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
+import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.template.TemplateService
 import com.polito.tesi.measuremanager.utils.SensorDecoder
@@ -33,6 +35,7 @@ class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
         private val mur: MeasurementUnitRepository,
         private val measurementRepository: MeasurementRepository,
+        private val sqr: SignalQualityRepository,
         private val ss: SecurityService,
         private val kcu: KafkaCuProducer,
         private val templateService: TemplateService,
@@ -96,13 +99,11 @@ class ControlUnitServiceImpl(
             newName: String?,
             newSemanticLocation: String?
     ): ControlUnitDTO {
-        // 1. Recupera la CU tramite ID dal repository
         val cu =
                 cur.findById(id).orElseThrow {
                     EntityNotFoundException("Control Unit con ID $id non trovata")
                 }
 
-        // 2. Aggiorna parzialmente solo i metadati passati (se non null)
         if (newName != null) {
             if (newName.isBlank())
                     throw IllegalArgumentException(
@@ -115,7 +116,6 @@ class ControlUnitServiceImpl(
             cu.semanticLocation = newSemanticLocation
         }
 
-        // 3. Salva l'entità e convertila usando la tua funzione .toDTO()
         return cur.save(cu).toDTO(templateService)
     }
 
@@ -131,16 +131,14 @@ class ControlUnitServiceImpl(
                                 "Il dispositivo non è ancora stato censito dalla rete. Accendilo e riprova."
                         )
 
-        // 3. Controllo sicurezza: è già di qualcuno?
         if (cu.user != null) {
             throw OperationNotAllowed(
                     "Questa Control Unit è già stata rivendicata da un altro utente."
             )
         }
 
-        // 4. Associazione (Claim)
         cu.user = currentUser
-        cu.name = "La mia CU $decodedDevEui" // L'utente potrà rinominarla dopo
+        cu.name = "La mia CU $decodedDevEui"
 
         return cur.save(cu).toDTO(templateService)
     }
@@ -157,17 +155,12 @@ class ControlUnitServiceImpl(
         kcu.sendCuCreate(event)
     }
 
-    // Nel ControlUnitServiceImpl.kt
     override fun sendPollingUpdate(command: CUConfigCommandDTO): CUConfigCommandDTO? {
-        // 1. (Opzionale) Aggiorna il valore nel database per coerenza locale
         val cu =
                 cur.findByDevEui(command.devEui.toLong())
                         ?: throw EntityNotFoundException("CU non trovata")
         cu.pollingInterval = command.pollingInterval
         cur.save(cu)
-
-        // 2. Invia il comando verso la CU via Kafka
-        // Supponendo che tu abbia un KafkaTemplate per inviare messaggi
 
         kcu.sendPollingUpdate(command.deviceId, command)
 
@@ -224,32 +217,25 @@ class ControlUnitServiceImpl(
                                 }
                 )
 
-        // 3. Update dei valori nel Database
         safeCommand.configurations.forEach { muConfig ->
-            // Cerchiamo la MU all'interno della CU
             val muEntity = cu.measurementUnits.find { it.localId == muConfig.localId }
 
             muEntity?.let { mu ->
                 muConfig.sensors.forEach { sensorConfig ->
-                    // Cerchiamo il sensore all'interno della MU
                     val sensorEntity =
                             mu.sensors.find { it.sensorIndex == sensorConfig.sensorIndex }
 
                     sensorEntity?.let { sensor ->
-                        // Aggiorniamo il valore (samplingF nel DB, samplingPeriod nel comando)
                         sensor.samplingF = sensorConfig.samplingPeriod.toDouble()
                     }
                 }
             }
         }
 
-        // 4. Salvataggio persistente
         cur.save(cu)
 
-        // 5. Codifica
         val encoded = encoder.encodeSensorConfig(safeCommand)
 
-        // 6. Invio (usa il deviceId recuperato dalla Entity per il routing MQTT)
         kcu.sendDownlink(cu.deviceId, encoded)
 
         return safeCommand
@@ -281,7 +267,6 @@ class ControlUnitServiceImpl(
                     this.localId = localId
                 }
 
-        // Funzione helper interna per aggiungere sensori alla MU
         fun addSensor(
                 modelName: String,
                 index: Int,
@@ -315,21 +300,15 @@ class ControlUnitServiceImpl(
 
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
-        // 1. Recupera o crea la CU
         val cu = getOrCreateControlUnit(c.devEui, c.deviceId)
         val savedCu = cur.save(cu)
 
-        // 2. PULIZIA: Scolleghiamo le MU esistenti
-        // Usiamo .toList() per creare una copia della lista ed evitare problemi di iterazione
-        // mentre modifichiamo i riferimenti
         savedCu.measurementUnits.toList().forEach { mu ->
             mu.controlUnit = null
             mur.save(mu)
         }
-        // Svuotiamo la lista lato CU per sincronizzare lo stato in memoria
         savedCu.measurementUnits.clear()
 
-        // 3. Elaborazione della nuova lista hardware
         c.muList.forEach { muDesc ->
             var mu = mur.findByExtendedId(muDesc.extendedId)
 
@@ -340,18 +319,14 @@ class ControlUnitServiceImpl(
                 mu.localId = muDesc.localId
             }
 
-            // 4. SINCRONIZZAZIONE
             mu.controlUnit = savedCu
             mu.user = savedCu.user
 
-            // Importante: aggiungiamo la MU alla lista della CU per mantenere la coerenza
-            // bidirezionale
             savedCu.measurementUnits.add(mu)
 
             mur.save(mu)
         }
 
-        // Il save finale della CU aggiornerà tutto l'albero
         cur.save(savedCu)
     }
 
@@ -376,7 +351,6 @@ class ControlUnitServiceImpl(
 
     @Transactional
     override fun onSignalUpdate(dto: SignalQualityUpdate) {
-        // 1. Conversione DevEUI da String (Hex) a Long
         val devEuiLong =
                 try {
                     dto.devEUI.toLong(16)
@@ -385,7 +359,6 @@ class ControlUnitServiceImpl(
                     return
                 }
 
-        // 2. Recupero della Control Unit
         val cu =
                 cur.findByDevEui(devEuiLong)
                         ?: run {
@@ -393,25 +366,12 @@ class ControlUnitServiceImpl(
                             return
                         }
 
-        // 3. Mappatura dei campi in base alla tua Entity
-        cu.rssi = dto.rssi.toDouble()
-
-        // Mappatura del DataRate:
-        // Se dto.dataRate è "DR5", estraiamo solo il numero 5
-        cu.dataRate =
+        val parsedDataRate =
                 try {
                     dto.dataRate.replace("DR", "").toInt()
                 } catch (e: Exception) {
-                    0 // Valore di fallback se il formato non è DRx
+                    0
                 }
-
-        cu.lastSeen =
-                LocalDateTime.parse(dto.time, java.time.format.DateTimeFormatter.ISO_DATE_TIME)
-
-        // Aggiorniamo SF e BW (che avevamo messo nel DTO o che possiamo estrarre)
-        // Nota: Se hai aggiornato il DTO SignalQualityUpdate includendo SF e BW:
-        cu.spreadingFactor = dto.spreadingFactor
-        cu.bandwidth = (dto.bandwidth / 1000) // Salviamo in kHz se preferisci
 
         val airtimeSeconds =
                 try {
@@ -419,12 +379,27 @@ class ControlUnitServiceImpl(
                 } catch (e: Exception) {
                     0.0
                 }
-        cu.lastAirtime = airtimeSeconds
-        cu.usedDailyAirtime += (airtimeSeconds * 1000).toInt()
 
-        // Frame counter LoRaWAN: controllo di continuità e persistenza.
-        // f_cnt che salta valori = uplink persi; f_cnt più basso del precedente = reset/rejoin
-        // della CU.
+        val timestampOffset =
+                try {
+                    java.time.OffsetDateTime.parse(dto.time)
+                } catch (e: Exception) {
+                    val localDt =
+                            java.time.LocalDateTime.parse(
+                                    dto.time,
+                                    java.time.format.DateTimeFormatter.ISO_DATE_TIME
+                            )
+                    localDt.atZone(java.time.ZoneId.systemDefault()).toOffsetDateTime()
+                }
+
+        cu.rssi = dto.rssi.toDouble()
+        cu.dataRate = parsedDataRate
+        cu.lastSeen = timestampOffset.toLocalDateTime()
+        cu.spreadingFactor = dto.spreadingFactor
+        cu.bandwidth = (dto.bandwidth / 1000)
+        cu.lastAirtime = airtimeSeconds
+        cu.usedDailyAirtime += (airtimeSeconds * 1000).toLong()
+
         val previousFCnt = cu.lastFCnt
         if (previousFCnt != null) {
             when {
@@ -440,11 +415,22 @@ class ControlUnitServiceImpl(
         }
         cu.lastFCnt = dto.fCnt
 
-        // 4. Salvataggio
         cur.save(cu)
 
+        val signalQuality =
+                SignalQuality(
+                        controlUnit = cu,
+                        timestamp = timestampOffset,
+                        rssi = dto.rssi.toDouble(),
+                        snr = dto.snr,
+                        dataRate = parsedDataRate,
+                        airtime = airtimeSeconds
+                )
+
+        sqr.save(signalQuality)
+
         println(
-                "Aggiornato segnale per CU ${cu.name} [EUI: ${dto.devEUI}]: RSSI=${cu.rssi}, DR=${cu.dataRate}, f_cnt=${dto.fCnt}"
+                "Aggiornato segnale e salvata serie temporale per CU ${cu.name} [EUI: ${dto.devEUI}]: RSSI=${cu.rssi}, SNR=${dto.snr}, DR=${cu.dataRate}, f_cnt=${dto.fCnt}"
         )
     }
 

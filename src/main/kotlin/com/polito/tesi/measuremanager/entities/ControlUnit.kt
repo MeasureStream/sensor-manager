@@ -38,6 +38,9 @@ class ControlUnit {
     @OneToMany(mappedBy = "controlUnit")
     var measurementUnits: MutableList<MeasurementUnit> = mutableListOf()
 
+    @OneToMany(mappedBy = "controlUnit", cascade = [CascadeType.ALL], fetch = FetchType.LAZY)
+    var signalQualities: MutableList<SignalQuality> = mutableListOf()
+
     /** Corrisponde a Setting1 (Byte 1). Gestito come Int per facilitare operazioni bitwise. */
     var setting1: Int = 0
 

@@ -21,7 +21,14 @@ data class SensorDTO(
     val calDate: Long?,
     val measLocId: Long?,
     val calInitials: String?,
-    val sensorTemplate: SensorTemplate, // ← qui metti tutto il template
+    /**
+     * Template del modello di sensore. Se non è fra quelli caricati non si lancia
+     * un'eccezione (farebbe fallire l'intera lista delle CU): arriva un segnaposto
+     * con il solo modelName e type vuoto, e [templateResolved] vale false.
+     */
+    val sensorTemplate: SensorTemplate,
+    /** False se il template di [modelName] non è stato trovato. */
+    val templateResolved: Boolean = true,
     /**
      * False se il sensore è oltre il limite di MAX_SENSORS_PER_CU (48) per la CU:
      * resta visibile in UI ma non è configurabile (campionamento forzato a OFF).
@@ -29,10 +36,11 @@ data class SensorDTO(
     val configurable: Boolean = true,
 )
 
+/** Segnaposto per un sensore il cui template non è caricato: la UI lo mette nel gruppo "Altro". */
+private fun unresolvedTemplate(modelName: String) = SensorTemplate(modelName = modelName, type = "")
+
 fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true): SensorDTO {
-    val template =
-        templateService.getTemplate(this.modelName)
-            ?: throw IllegalArgumentException("Template for ${this.modelName} not found")
+    val template = templateService.getTemplate(this.modelName)
 
     return SensorDTO(
         id = this.id,
@@ -51,7 +59,8 @@ fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true)
         calDate = this.calDate,
         measLocId = this.measLocId,
         calInitials = this.calInitials,
-        sensorTemplate = template,
+        sensorTemplate = template ?: unresolvedTemplate(this.modelName),
+        templateResolved = template != null,
         configurable = configurable,
     )
 }

@@ -1,5 +1,7 @@
 package com.polito.tesi.measuremanager.dtos
 
+import com.fasterxml.jackson.annotation.JsonProperty
+
 data class CUConfigCommandDTO(
         val deviceId: String, // Per sapere a chi inviare il comando
         val devEui: String, // Spesso necessario per il routing hardware
@@ -9,7 +11,11 @@ data class CUConfigCommandDTO(
 data class DownlinkRequestDTO(
         val deviceId: String,
         val rawPayload: ByteArray,
-        val fPort: Int = 15,
+        /**
+         * Serializzato esplicitamente come "fport", il nome che legge kafka-stream: senza
+         * annotazione il nome JSON dipende da come Jackson deriva la proprietà da getFPort().
+         */
+        @get:JsonProperty("fport") val fPort: Int = 15,
         val priority: String = "NORMAL",
         val confirmed: Boolean = false
 ) {

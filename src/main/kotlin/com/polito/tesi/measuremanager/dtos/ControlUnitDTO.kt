@@ -18,20 +18,30 @@ private const val MIN_OFFLINE_THRESHOLD_MINUTES = 30L
 
 /**
  * Una CU è online se ha contattato TTN di recente.
- * "Di recente" = entro 2 volte il transmissionInterval (1 step = 15 min, 255 = 1 min),
- * con un minimo di [MIN_OFFLINE_THRESHOLD_MINUTES].
+ * "Di recente" = entro 2 volte il periodo di trasmissione, con un minimo di
+ * [MIN_OFFLINE_THRESHOLD_MINUTES].
  * NB: lastSeen è salvato come orario UTC (parse del timestamp TTN), quindi il confronto
  * va fatto con l'ora UTC corrente.
  */
 fun ControlUnit.isOnline(): Boolean {
     val seen = lastSeen ?: return false
-    val intervalMinutes = when (transmissionInterval) {
-        in 1..254 -> transmissionInterval * 15L
-        255 -> 1L
-        else -> 0L // trasmissione OFF: resta valida solo la soglia minima
-    }
+    // Trasmissione OFF o indice riservato: resta valida solo la soglia minima
+    val intervalMinutes = transmissionPeriodMinutes(transmissionInterval) ?: 0L
     val thresholdMinutes = maxOf(MIN_OFFLINE_THRESHOLD_MINUTES, intervalMinutes * 2)
     return seen.isAfter(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(thresholdMinutes))
+}
+
+/**
+ * Periodo di trasmissione in minuti a partire dall'indice CU Trans. T (tabella
+ * "Codifica del periodo di trasmissione della CU", protocollo v1.2):
+ * 1–96 a passi di 15 min (15 min – 24 h), 97–240 a passi di 1 h (25 h – 7 g), 255 = 1 min.
+ * Null per 0 (trasmissione OFF) e per i valori riservati 241–254.
+ */
+private fun transmissionPeriodMinutes(index: Int): Long? = when (index) {
+    in 1..96 -> index * 15L
+    in 97..240 -> 24 * 60L + (index - 96) * 60L
+    255 -> 1L
+    else -> null
 }
 
 data class ControlUnitDTO(

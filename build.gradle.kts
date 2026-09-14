@@ -30,6 +30,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
     implementation("org.springframework.kafka:spring-kafka")
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.hashids:hashids:1.0.3")
     testImplementation("org.springframework.kafka:spring-kafka-test")
     developmentOnly("org.springframework.boot:spring-boot-docker-compose")

@@ -15,28 +15,25 @@ object SensorDecoder {
     data class DecodedValue(
             val physicalValue: Double?,
             val physicalVariance: Double?,
-            val status: String // "OK", "NO_NEW_DATA", "SENSOR_ERROR", "NOT_ACTIVE"
+            val status: String // "OK", "NO_NEW_DATA", "OUT_OF_BOUNDS", "RAW_FALLBACK"
     )
 
     /** Controlla e decodifica i valori raw di media e varianza per un sensore. */
     fun decode(modelName: String, rawMean: Int, rawVar: Int): DecodedValue {
-        // 1. Gestione Valori Sentinella
+        // 1. Valori sentinella (tabella "Valori sentinella" del protocollo).
+        // 0x0000 è un valore legittimo e non significa "sensore spento": se un sensore
+        // è spento lo dice la configurazione, non i byte ricevuti.
         if (rawMean == 0xFFFF && rawVar == 0xFFFF) {
             return DecodedValue(null, null, "NO_NEW_DATA") // Trans.T < Sampl.T
         }
-        if (rawMean == 0xFFFF && rawVar == 0xFFFF) { // In caso di 0xFFFFFFFF unico
-            return DecodedValue(null, null, "SENSOR_ERROR")
-        }
-        if (rawMean == 0 && rawVar == 0) {
-            return DecodedValue(null, null, "NOT_ACTIVE") // Sampl.T = 0
-        }
 
-        // 2. Conversione in base al tipo di sensore
+        // 2. Conversione in base al tipo di sensore. sensor.model_name contiene i modelName
+        // dei template; i nomi dei file restano per i sensori creati prima di quel cambio.
         return when (modelName.lowercase()) {
-            "pressure_ms5837" -> decodePressure(rawMean, rawVar)
-            "humidity_hpp845e", "humidity_htu21d" -> decodeHumidity(rawMean, rawVar)
-            "ntc_temperature" -> decodeNtc(rawMean, rawVar)
-            "accelerometer_lsm6dsm" -> DecodedValue(0.0, 0.0, "OK") // Sempre 0x0000
+            "pressuresensorms5837", "pressure_ms5837" -> decodePressure(rawMean, rawVar)
+            "humiditysensorhtu21d", "humidity_hpp845e", "humidity_htu21d" -> decodeHumidity(rawMean, rawVar)
+            "temperaturesensorntc", "ntc_temperature" -> decodeNtc(rawMean, rawVar)
+            "accelerometerlsm6dsm", "accelerometer_lsm6dsm" -> DecodedValue(0.0, 0.0, "OK") // Sempre 0x0000
             else -> DecodedValue(rawMean.toDouble(), rawVar.toDouble(), "RAW_FALLBACK")
         }
     }

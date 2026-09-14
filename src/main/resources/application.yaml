@@ -1,3 +1,10 @@
 spring:
   profiles:
     active: ${OS:default}
+  # Schema del database gestito dalle migrazioni in db/migration.
+  # Su un database già popolato e senza storico Flyway (la Pi) la versione 1 viene
+  # registrata come baseline senza eseguirla; su un database vuoto V1 crea lo schema.
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1

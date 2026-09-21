@@ -2,18 +2,18 @@ package com.polito.tesi.measuremanager.template
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
-import com.fasterxml.jackson.module.kotlin.KotlinModule.Builder
+
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.stereotype.Service
 import java.io.File
 
 @Service
 class TemplateService(
-    private val objectMapper: ObjectMapper = ObjectMapper().registerModule(
-        KotlinModule.Builder().build()
-    )
+    private val objectMapper: ObjectMapper =
+        ObjectMapper().registerModule(
+            KotlinModule.Builder().build(),
+        ),
 ) {
-
     private val templates = mutableMapOf<String, SensorTemplate>()
 
     fun loadTemplates(path: String = "/app/templates") {
@@ -33,7 +33,6 @@ class TemplateService(
     }
 
     fun getAllTemplates(): List<SensorTemplate> = templates.values.toList()
-
 
     fun loadSingleTemplate(file: File): SensorTemplate {
         val template: SensorTemplate = objectMapper.readValue(file)

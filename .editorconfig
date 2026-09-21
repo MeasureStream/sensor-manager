@@ -1,0 +1,5 @@
+[*.{kt,kts}]
+indent_size = 4
+# Forza lo spazio dopo la virgola e altre regole comuni
+kotlin_imports_layout = ascii
+insert_final_newline = true

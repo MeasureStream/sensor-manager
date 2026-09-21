@@ -6,7 +6,7 @@ import java.nio.file.*
 
 @Component
 class TemplateLoader(
-    private val templateService: TemplateService
+    private val templateService: TemplateService,
 ) {
     private val templatesPath: String = "/app/templates"
 
@@ -27,7 +27,7 @@ class TemplateLoader(
             watchService,
             StandardWatchEventKinds.ENTRY_CREATE,
             StandardWatchEventKinds.ENTRY_MODIFY,
-            StandardWatchEventKinds.ENTRY_DELETE
+            StandardWatchEventKinds.ENTRY_DELETE,
         )
 
         Thread {
@@ -40,13 +40,14 @@ class TemplateLoader(
 
                     when (kind) {
                         StandardWatchEventKinds.ENTRY_CREATE,
-                        StandardWatchEventKinds.ENTRY_MODIFY -> {
+                        StandardWatchEventKinds.ENTRY_MODIFY,
+                        -> {
                             if (fullPath.extension.lowercase() == "json") {
                                 try {
                                     val template = templateService.loadSingleTemplate(fullPath)
                                     println("Template reloaded: ${template.modelName}")
                                 } catch (ex: Exception) {
-                                    println("Failed to reload template ${fileName}: ${ex.message}")
+                                    println("Failed to reload template $fileName: ${ex.message}")
                                 }
                             }
                         }

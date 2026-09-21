@@ -1,0 +1,34 @@
+package com.polito.tesi.measuremanager.dtos
+
+import com.fasterxml.jackson.annotation.JsonProperty
+
+data class CUConfigCommandDTO(
+        val deviceId: String, // Per sapere a chi inviare il comando
+        val devEui: String, // Spesso necessario per il routing hardware
+        val pollingInterval: Int // Il nuovo valore da impostare
+)
+
+data class DownlinkRequestDTO(
+        val deviceId: String,
+        val rawPayload: ByteArray,
+        /**
+         * Serializzato esplicitamente come "fport", il nome che legge kafka-stream: senza
+         * annotazione il nome JSON dipende da come Jackson deriva la proprietà da getFPort().
+         */
+        @get:JsonProperty("fport") val fPort: Int = 15,
+        val priority: String = "NORMAL",
+        val confirmed: Boolean = false
+) {
+    // Override necessario per stampare i byte in modo leggibile nei log
+    override fun toString(): String {
+        return "DownlinkRequestDTO(deviceId='$deviceId', fPort=$fPort, payload=${rawPayload.joinToString("") { "%02x".format(it) }})"
+    }
+}
+
+data class MeasureCUConfigRequest(val cuid: Long, val sensors: List<MeasureMUConfigRequest>)
+
+data class MeasureMUConfigRequest(
+        val extendedId: Long,
+        val sensorId: Long,
+        val configurationMeasure: String
+)

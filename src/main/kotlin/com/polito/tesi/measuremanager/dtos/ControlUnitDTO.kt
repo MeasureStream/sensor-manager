@@ -84,6 +84,21 @@ data class ControlUnitDTO(
 
     val transmissionInterval: Int,
 
+    /**
+     * Versione di configurazione che il server considera attiva. Sul filo ne viaggia solo
+     * il byte basso, ed e' su quello che si confrontano i report.
+     */
+    val configVersion: Long,
+    /**
+     * Report scartati perche' la CU dichiarava un CFG_VER diverso: > 0 significa che si
+     * stanno perdendo misure e che serve un riallineamento della configurazione o un reset.
+     */
+    val configMismatchCount: Long,
+    /** Ultimo CFG_VER dichiarato dalla CU, quando c'e' un disallineamento aperto. */
+    val lastReportedConfigVersion: Int?,
+    /** Quando e' arrivato l'ultimo report scartato. */
+    val lastConfigMismatchAt: java.time.OffsetDateTime?,
+
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
     val measurementUnits: List<MeasurementUnitDTO> = listOf(),
 
@@ -119,6 +134,10 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     usedDailyAirtime = usedDailyAirtime,
     lastAirtime = lastAirtime,
     transmissionInterval = transmissionInterval,
+    configVersion = configVersion,
+    configMismatchCount = configMismatchCount,
+    lastReportedConfigVersion = lastReportedConfigVersion,
+    lastConfigMismatchAt = lastConfigMismatchAt,
 
     lastFCnt = lastFCnt,
 

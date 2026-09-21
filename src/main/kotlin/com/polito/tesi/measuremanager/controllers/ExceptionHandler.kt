@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.controllers
 
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
+import com.polito.tesi.measuremanager.template.TemplateRejected
 import jakarta.persistence.EntityExistsException
 import jakarta.persistence.EntityNotFoundException
 import jakarta.validation.ConstraintViolationException
@@ -48,6 +49,14 @@ class ProblemDetailsHandler : ResponseEntityExceptionHandler() {
     fun handleEntityAlreadyExsits(e: EntityExistsException): ProblemDetail  {
         val d = ProblemDetail.forStatus(HttpStatus.CONFLICT)
         d.title = "Entity Already exsists"
+        d.detail = e.message
+        return d
+    }
+
+    @ExceptionHandler(TemplateRejected::class)
+    fun handleTemplateRejected(e: TemplateRejected): ProblemDetail {
+        val d = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+        d.title = "Template rifiutato"
         d.detail = e.message
         return d
     }

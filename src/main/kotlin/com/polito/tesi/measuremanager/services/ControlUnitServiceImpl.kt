@@ -15,6 +15,7 @@ import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
+import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.TemplateService
 import com.polito.tesi.measuremanager.utils.SensorDecoder
 import jakarta.persistence.EntityNotFoundException
@@ -39,6 +40,7 @@ class ControlUnitServiceImpl(
         private val ss: SecurityService,
         private val kcu: KafkaCuProducer,
         private val templateService: TemplateService,
+        private val muModelService: MuModelService,
         private val encoder: LorawanPayloadEncoder,
 ) : ControlUnitService {
 
@@ -258,45 +260,13 @@ class ControlUnitServiceImpl(
         return cu.toCUTransmissionCommandDTO()
     }
 
-    fun createMuByModel(extendedId: Long, model: Int, localId: Int): MeasurementUnit {
-        val mu =
-                MeasurementUnit().apply {
-                    this.extendedId = extendedId
-                    this.model = model
-                    this.sensors = mutableListOf()
-                    this.localId = localId
-                }
-
-        fun addSensor(
-                modelName: String,
-                index: Int,
-        ) {
-            val sensor =
-                    Sensor(
-                            modelName = modelName,
-                            measurementUnit = mu,
-                            sensorIndex = index,
-                            configurationMeasure = "average-std"
-                    )
-            mu.sensors.add(sensor)
-        }
-
-        when (model) {
-            1 -> {
-                addSensor("AccelerometerLSM6DSM", 1)
-                addSensor("PressureSensorMS5837", 2)
-                addSensor("HumiditySensorHTU21D", 3)
-                addSensor("TemperatureSensorNTC", 4)
-            }
-            100 -> {
-                addSensor("AccelerometerLSM6DSM", 1)
-                addSensor("TemperatureSensorNTC", 2)
-            }
-            else -> throw OperationNotAllowed("Model $model not supported")
-        }
-
-        return mu
-    }
+    /**
+     * Gli slot di una MU vengono dal modello pubblicato nel registro (passo 11): l'elenco dei
+     * sensori non e' piu' scritto qui. Un modello sconosciuto non e' piu' un errore: la MU
+     * nasce senza slot e li riceve quando il modello viene pubblicato.
+     */
+    fun createMuByModel(extendedId: Long, model: Int, localId: Int): MeasurementUnit =
+            muModelService.createMeasurementUnit(extendedId, model, localId)
 
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
@@ -487,14 +457,42 @@ class ControlUnitServiceImpl(
                             return
                         }
 
-        if (dto.configVersion.toLong() != c.configVersion) {
+        // Il CFG_VER viaggia su un byte: il confronto si fa sugli otto bit bassi, altrimenti
+        // dalla 256esima configurazione in poi nessun report risulterebbe piu' allineato.
+        val expectedConfigVersion = (c.configVersion and 0xFF).toInt()
+
+        if (dto.configVersion != expectedConfigVersion) {
+            // Il report resta scartato: senza sapere quale configurazione era attiva, quei byte
+            // non sono decodificabili nemmeno in seguito. Ma non sparisce in silenzio: il
+            // contatore dice quante misure si stanno perdendo e da quando, e l'interfaccia lo
+            // mostra. Si rientra riallineando la configurazione o resettando la CU.
+            c.configMismatchCount += 1
+            c.lastConfigMismatchAt = OffsetDateTime.now()
+            c.lastReportedConfigVersion = dto.configVersion
+            cur.save(c)
+
             log.warn(
-                    "Attenzione: arrivata configVersion differente per CU devEUI={}. Ricevuta={}, Attesa={}",
+                    "Report scartato per CFG_VER disallineato: CU devEUI={} dichiara {}, il server attende {} (scartati finora: {})",
                     dto.devEui,
                     dto.configVersion,
-                    c.configVersion
+                    expectedConfigVersion,
+                    c.configMismatchCount,
             )
             return
+        }
+
+        // Report allineato: se c'era un disallineamento aperto, e' rientrato.
+        if (c.configMismatchCount > 0) {
+            log.info(
+                    "CU devEUI={} di nuovo allineata su CFG_VER {}: {} report erano stati scartati",
+                    dto.devEui,
+                    expectedConfigVersion,
+                    c.configMismatchCount,
+            )
+            c.configMismatchCount = 0
+            c.lastConfigMismatchAt = null
+            c.lastReportedConfigVersion = null
+            cur.save(c)
         }
 
         if (dto.rawPayload.isBlank()) {

@@ -1,13 +1,14 @@
 package com.polito.tesi.measuremanager.dtos
 
 import com.polito.tesi.measuremanager.entities.Sensor
-import com.polito.tesi.measuremanager.template.SensorTemplate
 import com.polito.tesi.measuremanager.template.TemplateService
 
 data class SensorDTO(
     val id: Long,
     val modelName: String,
     val sensorIndex: Int,
+    /** Asse dello slot ("X", "Y", "Z"), quando il modello di MU ne dichiara uno. */
+    val channel: String? = null,
     val physVal: Double,
     val elecVal: Double,
     val samplingF: Double,
@@ -22,12 +23,13 @@ data class SensorDTO(
     val measLocId: Long?,
     val calInitials: String?,
     /**
-     * Template del modello di sensore. Se non è fra quelli caricati non si lancia
-     * un'eccezione (farebbe fallire l'intera lista delle CU): arriva un segnaposto
-     * con il solo modelName e type vuoto, e [templateResolved] vale false.
+     * Riferimento al template, non il template intero: il documento si scarica una volta
+     * sola da /API/templates. Se il registro non ha quel modello vale null — nessuna
+     * eccezione, che farebbe fallire l'intera lista delle CU — e la UI mette il sensore
+     * nel gruppo "Altro".
      */
-    val sensorTemplate: SensorTemplate,
-    /** False se il template di [modelName] non è stato trovato. */
+    val template: TemplateRefDTO?,
+    /** Comodità per la UI: equivale a `template != null`. */
     val templateResolved: Boolean = true,
     /**
      * False se il sensore è oltre il limite di MAX_SENSORS_PER_CU (48) per la CU:
@@ -36,16 +38,17 @@ data class SensorDTO(
     val configurable: Boolean = true,
 )
 
-/** Segnaposto per un sensore il cui template non è caricato: la UI lo mette nel gruppo "Altro". */
-private fun unresolvedTemplate(modelName: String) = SensorTemplate(modelName = modelName, type = "")
-
 fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true): SensorDTO {
-    val template = templateService.getTemplate(this.modelName)
+    // Il record dice identificativo, MAJOR e versione risolta; il documento i due campi
+    // che servono alla card. Entrambi arrivano dalla cache del registro, senza query.
+    val record = templateService.getDocument(this.modelName)
+    val ref = record?.let { templateRef(it, templateService.getTemplate(this.modelName)) }
 
     return SensorDTO(
         id = this.id,
         modelName = this.modelName,
         sensorIndex = this.sensorIndex,
+        channel = this.channel,
         physVal = this.physVal,
         elecVal = this.elecVal,
         samplingF = this.samplingF,
@@ -59,8 +62,8 @@ fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true)
         calDate = this.calDate,
         measLocId = this.measLocId,
         calInitials = this.calInitials,
-        sensorTemplate = template ?: unresolvedTemplate(this.modelName),
-        templateResolved = template != null,
+        template = ref,
+        templateResolved = ref != null,
         configurable = configurable,
     )
 }

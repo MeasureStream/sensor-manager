@@ -52,6 +52,9 @@ interface MeasurementUnitRepository : JpaRepository<MeasurementUnit, Long>, Pagi
 
 
 
+    /** Tutte le MU di un modello: serve a riempire gli slot quando il modello viene pubblicato. */
+    fun findAllByModel(model: Int): List<MeasurementUnit>
+
     @Query("SELECT MAX(m.extendedId) FROM MeasurementUnit m")
     fun findMaxExtendedId(): Long?
 }

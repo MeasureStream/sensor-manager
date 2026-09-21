@@ -14,6 +14,12 @@ class Sensor(
         var modelName: String,
         @ManyToOne @JoinColumn(name = "mu_id") var measurementUnit: MeasurementUnit?,
         var sensorIndex: Int = 0,
+        /**
+         * Asse dello slot ("X", "Y", "Z") quando il modello di MU istanzia piu' volte lo
+         * stesso template: il template dei tre assi e' identico, l'identita' dell'asse vive
+         * qui. Null per i sensori che non hanno canali.
+         */
+        @Column(length = 8) var channel: String? = null,
         var setting1: Int = 0,
         var samplingPeriod: Int = 0,
 

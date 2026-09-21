@@ -1,48 +1,37 @@
 package com.polito.tesi.measuremanager.template
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-
-import com.fasterxml.jackson.module.kotlin.readValue
+import com.polito.tesi.measuremanager.entities.TemplateKind
+import com.polito.tesi.measuremanager.entities.TemplateRecord
 import org.springframework.stereotype.Service
-import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Vista «template di sensore» sul registro.
+ *
+ * Esiste per non cambiare i chiamanti (DTO e servizi) mentre la fonte passa dai file al
+ * registro: la firma [getTemplate] resta quella di prima. Il passo 8 sostituira' il nome
+ * del modello con il riferimento `(templateId, MAJOR)` e questa classe sparira'.
+ */
 @Service
 class TemplateService(
-    private val objectMapper: ObjectMapper =
-        ObjectMapper().registerModule(
-            KotlinModule.Builder().build(),
-        ),
+        private val registry: TemplateRegistry,
+        private val objectMapper: ObjectMapper,
 ) {
-    private val templates = mutableMapOf<String, SensorTemplate>()
+    /** Le versioni sono immutabili: la deserializzazione si fa una volta per impronta. */
+    private val parsed = ConcurrentHashMap<String, SensorTemplate>()
 
-    fun loadTemplates(path: String = "/app/templates") {
-        val folder = File(path)
-        if (!folder.exists() || !folder.isDirectory) {
-            throw RuntimeException("Template folder not found: $path")
-        }
+    fun getTemplate(modelName: String): SensorTemplate? =
+            registry.resolveByModelName(modelName)?.let { toSensorTemplate(it) }
 
-        folder.listFiles { f -> f.extension == "json" }?.forEach { file ->
-            val template: SensorTemplate = objectMapper.readValue(file)
-            templates[template.modelName.lowercase()] = template
-        }
-    }
+    fun getAllTemplates(): List<SensorTemplate> =
+            registry.list(TemplateKind.SENSOR).mapNotNull { toSensorTemplate(it) }
 
-    fun getTemplate(modelName: String): SensorTemplate? {
-        return templates[modelName.lowercase()]
-    }
+    /** Il documento completo, quando servono i campi che [SensorTemplate] non porta. */
+    fun getDocument(modelName: String): TemplateRecord? = registry.resolveByModelName(modelName)
 
-    fun getAllTemplates(): List<SensorTemplate> = templates.values.toList()
-
-    fun loadSingleTemplate(file: File): SensorTemplate {
-        val template: SensorTemplate = objectMapper.readValue(file)
-        templates[template.modelName.lowercase()] = template
-        return template
-    }
-
-    fun removeTemplate(fileName: String) {
-        // Rimuove il template basato sul nome del file senza estensione
-        val key = fileName.substringBeforeLast(".").lowercase()
-        templates.remove(key)
-    }
+    private fun toSensorTemplate(record: TemplateRecord): SensorTemplate? =
+            parsed.getOrPut(record.contentHash) {
+                objectMapper.convertValue(record.content, SensorTemplate::class.java)
+            }
 }

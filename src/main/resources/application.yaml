@@ -8,3 +8,9 @@ spring:
     enabled: true
     baseline-on-migrate: true
     baseline-version: 1
+
+# Registro dei template: la cartella e' il seme importato all'avvio, non piu' la fonte a
+# runtime. Dopo l'import si pubblica con POST /API/templates e la cache si aggiorna subito.
+measurestream:
+  templates:
+    seed-path: ${TEMPLATES_SEED_PATH:/app/templates}

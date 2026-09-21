@@ -73,4 +73,16 @@ class ControlUnit {
     var lastFCnt: Int? = null
 
     var configVersion: Long = 0
+
+    /**
+     * Report scartati perche' la CU dichiarava un CFG_VER diverso da quello atteso.
+     * Si azzera al primo report allineato: e' il segno che il guasto e' rientrato.
+     */
+    var configMismatchCount: Long = 0
+
+    /** Quando e' arrivato l'ultimo report scartato per disallineamento. */
+    var lastConfigMismatchAt: java.time.OffsetDateTime? = null
+
+    /** Ultimo CFG_VER dichiarato dalla CU: confrontato con [configVersion] dice di quanto e' fuori fase. */
+    var lastReportedConfigVersion: Int? = null
 }

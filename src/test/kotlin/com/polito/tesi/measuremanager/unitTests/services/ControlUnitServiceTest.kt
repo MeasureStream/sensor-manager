@@ -9,10 +9,15 @@ import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
+import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
+import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
+import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
+import com.polito.tesi.measuremanager.entities.Sensor
+import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
@@ -27,24 +32,54 @@ class ControlUnitServiceTest {
 
     private val cur = mockk<ControlUnitRepository>()
     private val mur = mockk<MeasurementUnitRepository>()
+    private val mr = mockk<MeasurementRepository>()
+    private val sqr = mockk<SignalQualityRepository>()
     private val ss = mockk<SecurityService>()
     private val kcu = mockk<KafkaCuProducer>()
     private val ts = mockk<TemplateService>()
+    private val muModel = mockk<MuModelService>()
+    private val encoder = mockk<LorawanPayloadEncoder>()
 
-    private val service = ControlUnitServiceImpl(cur, mur, ss, kcu, ts)
+    private val service = ControlUnitServiceImpl(cur, mur, mr, sqr, ss, kcu, ts, muModel, encoder)
+
+    /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
+    private fun mu0001(extendedId: Long, localId: Int) =
+            MeasurementUnit().apply {
+                this.extendedId = extendedId
+                this.model = 1
+                this.localId = localId
+                this.sensors = mutableListOf()
+                listOf(
+                                "AccelerometerLSM6DSM",
+                                "PressureSensorMS5837",
+                                "HumiditySensorHTU21D",
+                                "TemperatureSensorNTC",
+                        )
+                        .forEachIndexed { index, name ->
+                            sensors.add(
+                                    Sensor(
+                                            modelName = name,
+                                            measurementUnit = this,
+                                            sensorIndex = index,
+                                            configurationMeasure = "average-std",
+                                    )
+                            )
+                        }
+            }
 
     // --- TEST: getControlUnit ---
     @Test
     fun `getControlUnit as Admin should return CU regardless of owner`() {
-        val cu = ControlUnit().apply { id = 1; name = "Admin CU"; devEui = 123L }
+        val cu = ControlUnit().apply { id = 1; name = "Admin CU"; devEui = 123L; deviceId = "lora-e5" }
         every { ss.isAdmin() } returns true
         every { cur.findByIdOrNull(1L) } returns cu
-        every { ts.getTemplate(any()) } returns mockk() // Per toDTO() se necessario
+        // toDTO chiede il documento al registro: qui non serve, il DTO esce con template = null
+        every { ts.getDocument(any()) } returns null
 
         val result = service.getControlUnit(1L)
 
         assertNotNull(result)
-        assertEquals(123L, result.devEui)
+        assertEquals("123", result.devEui)
         verify { cur.findByIdOrNull(1L) }
     }
 
@@ -65,7 +100,7 @@ class ControlUnitServiceTest {
         val devEui = 12345L
         val hash = NetworkIdEncoder.encode(devEui)
         val user = User().apply { userId = "new-owner" }
-        val orphanCu = ControlUnit().apply { this.devEui = devEui; this.user = null; name = "Old" }
+        val orphanCu = ControlUnit().apply { this.devEui = devEui; this.deviceId = "lora-e5"; this.user = null; name = "Old" }
 
         every { ss.getOrCreateCurrentUser() } returns user
         every { cur.findByDevEui(devEui) } returns orphanCu
@@ -101,8 +136,17 @@ class ControlUnitServiceTest {
     // --- TEST: onStatusUpdate (Heartbeat 0x0A) ---
     @Test
     fun `onStatusUpdate should update battery and model`() {
-        val update = CuStatusUpdate(devEui = 111L, model = 5, batteryLevel = 75, statusRaw = 0)
-        val existingCu = ControlUnit().apply { devEui = 111L; remainingBattery = 100.0 }
+        val update = CuStatusUpdate(
+                devEui = 111L,
+                deviceId = "lora-e5",
+                model = 5,
+                batteryLevel = 75,
+                ptx = 14,
+                acPowered = false,
+                isCharging = false,
+                statusRaw = 0,
+        )
+        val existingCu = ControlUnit().apply { devEui = 111L; deviceId = "lora-e5"; remainingBattery = 100.0 }
 
         every { cur.findByDevEui(111L) } returns existingCu
         every { cur.save(any()) } answers { firstArg() }
@@ -121,14 +165,16 @@ class ControlUnitServiceTest {
         val oldMu = MeasurementUnit().apply { extendedId = 555L }
         val cu = ControlUnit().apply {
             this.devEui = devEui
+            this.deviceId = "lora-e5"
             this.measurementUnits = mutableListOf(oldMu)
         }
         oldMu.controlUnit = cu
 
-        val notification = CuJoinNotification(devEui, listOf(MuDescriptor(666L, 1, 100)))
+        val notification = CuJoinNotification(devEui, "lora-e5", listOf(MuDescriptor(666L, 1, 100)))
 
         every { cur.findByDevEui(devEui) } returns cu
         every { mur.findByExtendedId(666L) } returns null // Nuova MU
+        every { muModel.createMeasurementUnit(666L, 100, 1) } returns mu0001(666L, 1)
         every { cur.save(any()) } answers { firstArg() }
         every { mur.save(any()) } answers { firstArg() }
 
@@ -198,12 +244,14 @@ class ControlUnitServiceTest {
         val muExtendedId = 999L
         val notification = CuJoinNotification(
             devEui = devEui,
+            deviceId = "lora-e5",
             muList = listOf(MuDescriptor(muExtendedId, localId = 1, model = 1))
         )
 
         // Simuliamo che la CU non esista e la MU non esista
         every { cur.findByDevEui(devEui) } returns null
         every { mur.findByExtendedId(muExtendedId) } returns null
+        every { muModel.createMeasurementUnit(muExtendedId, 1, 1) } returns mu0001(muExtendedId, 1)
 
         // Slot per catturare cosa viene salvato
         val cuSlot = slot<ControlUnit>()
@@ -219,8 +267,10 @@ class ControlUnitServiceTest {
         verify(atLeast = 1) { mur.save(any()) }
 
         val savedMu = muSlot.captured
-        assertEquals(4, savedMu.sensors.size) // Il modello 1 deve avere 4 sensori
-        assertEquals("accelerometer_lsm6dsm", savedMu.sensors[0].modelName)
+        // Lo 0x0001 v0.1.0 ha quattro slot e gli indici partono da 0.
+        assertEquals(4, savedMu.sensors.size)
+        assertEquals("AccelerometerLSM6DSM", savedMu.sensors[0].modelName)
+        assertEquals(0, savedMu.sensors[0].sensorIndex)
     }
 
 }

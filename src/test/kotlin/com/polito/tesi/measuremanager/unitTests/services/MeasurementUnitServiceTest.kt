@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.unitTests.services
 
 import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
+import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
@@ -96,6 +97,8 @@ class MeasurementUnitServiceTest {
             id = muId
             extendedId = 999L
             model = 1
+            // Senza proprietario toMUCreateDTO() torna null e l'evento non parte.
+            user = User().apply { userId = "owner" }
         }
 
         // Mockiamo il comportamento dei repository e dei servizi

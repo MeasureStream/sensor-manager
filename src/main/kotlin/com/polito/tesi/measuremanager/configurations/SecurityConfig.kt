@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.configurations
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.convert.converter.Converter
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.GrantedAuthority
@@ -18,6 +19,10 @@ class SecurityConfig {
         return httpSecurity
             .authorizeHttpRequests {
                 it.requestMatchers("/actuator/**").permitAll()
+                // Il registro dei template: chiunque sia autenticato legge, solo la CI e gli
+                // amministratori pubblicano o revocano.
+                it.requestMatchers(HttpMethod.POST, "/API/templates/**")
+                    .hasAnyRole("ADMIN", "TEMPLATE_PUBLISHER")
                 it.anyRequest().authenticated()
                 // it.anyRequest().permitAll()
             }

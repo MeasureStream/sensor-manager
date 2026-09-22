@@ -10,6 +10,12 @@ enum class FrameStatus {
     /** Letto e misure salvate. */
     DECODED,
 
+    /**
+     * Letto con l'istantanea di configurazione dichiarata dal report, non con quella
+     * corrente: la CU era indietro di una configurazione, ma i byte erano interpretabili.
+     */
+    DECODED_WITH_SNAPSHOT,
+
     /** La CU dichiarava un CFG_VER diverso da quello atteso: la mappa degli slot non e' nota. */
     DISCARDED_CFG_MISMATCH,
 

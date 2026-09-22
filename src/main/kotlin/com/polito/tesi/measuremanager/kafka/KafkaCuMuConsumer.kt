@@ -1,15 +1,20 @@
 package com.polito.tesi.measuremanager.kafka
 
+import com.polito.tesi.measuremanager.dtos.CuAlarmUpdate
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CuMeasuresUpdate
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.SignalQualityUpdate
+import com.polito.tesi.measuremanager.services.AlarmService
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.stereotype.Service
 
 @Service
-class KafkaCUMuConsumer(private val cus: ControlUnitServiceImpl) {
+class KafkaCUMuConsumer(
+        private val cus: ControlUnitServiceImpl,
+        private val alarmService: AlarmService,
+) {
     @KafkaListener(
             topics = ["cu-join-notification"],
             groupId = "measure-manager-group",
@@ -82,6 +87,38 @@ class KafkaCUMuConsumer(private val cus: ControlUnitServiceImpl) {
             cus.onMeasuresUpdate(dto)
         } catch (e: Exception) {
             println("ERRORE durante consumeCuMeasures: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    @KafkaListener(
+            topics = ["cu-alarms"],
+            groupId = "measure-manager-group",
+            properties =
+                    [
+                            "spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.CuAlarmUpdate"]
+    )
+    fun consumeAlarms(dto: CuAlarmUpdate) {
+        try {
+            alarmService.onAlarms(dto)
+        } catch (e: Exception) {
+            println("ERRORE durante consumeAlarms: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    @KafkaListener(
+            topics = ["cu-events"],
+            groupId = "measure-manager-group",
+            properties =
+                    [
+                            "spring.json.value.default.type=com.polito.tesi.measuremanager.dtos.CuAlarmUpdate"]
+    )
+    fun consumeEvents(dto: CuAlarmUpdate) {
+        try {
+            alarmService.onEvents(dto)
+        } catch (e: Exception) {
+            println("ERRORE durante consumeEvents: ${e.message}")
             e.printStackTrace()
         }
     }

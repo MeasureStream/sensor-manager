@@ -91,4 +91,20 @@ class ControlUnit {
      * valido. Diverso da [configMismatchCount], che conta il disallineamento di versione.
      */
     var decodeFailureCount: Long = 0
+
+    /**
+     * CMD_SEQ: numero dell'ultimo comando di configurazione inviato, nel prologo di blocco.
+     * Serve alla CU per riconoscere una ritrasmissione e non applicarla due volte. Viaggia su
+     * un byte, quindi va in wrap a 255 come CFG_VER.
+     */
+    var cmdSeq: Int = 0
+
+    /**
+     * ALARM_SEQ ed EVENT_SEQ dell'ultimo messaggio ricevuto. Sono progressivi: confrontarli
+     * con quello che arriva e' l'unico modo che il server ha di accorgersi di un allarme o di
+     * un evento perso per strada.
+     */
+    var lastAlarmSeq: Int? = null
+
+    var lastEventSeq: Int? = null
 }

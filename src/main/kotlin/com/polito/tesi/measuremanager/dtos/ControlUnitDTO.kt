@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.dtos
 
 import com.polito.tesi.measuremanager.entities.ControlUnit
+import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.NegativeOrZero
@@ -23,25 +24,12 @@ private const val MIN_OFFLINE_THRESHOLD_MINUTES = 30L
  * NB: lastSeen è salvato come orario UTC (parse del timestamp TTN), quindi il confronto
  * va fatto con l'ora UTC corrente.
  */
-fun ControlUnit.isOnline(): Boolean {
+fun ControlUnit.isOnline(protocol: ProtocolService? = null): Boolean {
     val seen = lastSeen ?: return false
-    // Trasmissione OFF o indice riservato: resta valida solo la soglia minima
-    val intervalMinutes = transmissionPeriodMinutes(transmissionInterval) ?: 0L
+    // Trasmissione OFF, indice riservato o dizionario non pubblicato: resta la soglia minima.
+    val intervalMinutes = protocol?.transmissionPeriodMinutes(transmissionInterval) ?: 0L
     val thresholdMinutes = maxOf(MIN_OFFLINE_THRESHOLD_MINUTES, intervalMinutes * 2)
     return seen.isAfter(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(thresholdMinutes))
-}
-
-/**
- * Periodo di trasmissione in minuti a partire dall'indice CU Trans. T (tabella
- * "Codifica del periodo di trasmissione della CU", protocollo v1.2):
- * 1–96 a passi di 15 min (15 min – 24 h), 97–240 a passi di 1 h (25 h – 7 g), 255 = 1 min.
- * Null per 0 (trasmissione OFF) e per i valori riservati 241–254.
- */
-private fun transmissionPeriodMinutes(index: Int): Long? = when (index) {
-    in 1..96 -> index * 15L
-    in 97..240 -> 24 * 60L + (index - 96) * 60L
-    255 -> 1L
-    else -> null
 }
 
 data class ControlUnitDTO(
@@ -94,6 +82,8 @@ data class ControlUnitDTO(
      * stanno perdendo misure e che serve un riallineamento della configurazione o un reset.
      */
     val configMismatchCount: Long,
+    /** Report scartati perche' non decodificabili: payload troncato o corrotto. */
+    val decodeFailureCount: Long,
     /** Ultimo CFG_VER dichiarato dalla CU, quando c'e' un disallineamento aperto. */
     val lastReportedConfigVersion: Int?,
     /** Quando e' arrivato l'ultimo report scartato. */
@@ -104,7 +94,14 @@ data class ControlUnitDTO(
 
 )
 
-fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
+/**
+ * @param protocol dizionario di protocollo, da cui esce la scala del periodo di
+ * trasmissione usata per lo stato online. Assente: vale solo la soglia minima.
+ */
+fun ControlUnit.toDTO(
+    templateService: TemplateService,
+    protocol: ProtocolService? = null,
+) = ControlUnitDTO(
     id = id,
     devEui = devEui.toString(),
     deviceId = deviceId,
@@ -116,7 +113,7 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     model = model,
     // Stato derivato da lastSeen: unica fonte di verità per landing e pagina di dettaglio.
     // (il campo status dell'entità non veniva mai aggiornato: restava sempre 0)
-    status = if (isOnline()) 1 else 0,
+    status = if (isOnline(protocol)) 1 else 0,
     dataRate = dataRate,
     usedDC = usedDC,
     hasGPS = hasGPS,
@@ -136,6 +133,7 @@ fun ControlUnit.toDTO(templateService: TemplateService) = ControlUnitDTO(
     transmissionInterval = transmissionInterval,
     configVersion = configVersion,
     configMismatchCount = configMismatchCount,
+    decodeFailureCount = decodeFailureCount,
     lastReportedConfigVersion = lastReportedConfigVersion,
     lastConfigMismatchAt = lastConfigMismatchAt,
 

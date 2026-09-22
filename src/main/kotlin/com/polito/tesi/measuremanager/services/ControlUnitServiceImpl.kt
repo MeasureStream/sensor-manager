@@ -16,6 +16,13 @@ import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.template.MuModelService
+import com.polito.tesi.measuremanager.entities.FrameStatus
+import com.polito.tesi.measuremanager.entities.UplinkFrame
+import com.polito.tesi.measuremanager.entities.Metric
+import com.polito.tesi.measuremanager.entities.MetricSample
+import com.polito.tesi.measuremanager.repositories.MetricSampleRepository
+import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
+import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.TemplateService
 import com.polito.tesi.measuremanager.utils.SensorDecoder
 import jakarta.persistence.EntityNotFoundException
@@ -41,6 +48,9 @@ class ControlUnitServiceImpl(
         private val kcu: KafkaCuProducer,
         private val templateService: TemplateService,
         private val muModelService: MuModelService,
+        private val protocolService: ProtocolService,
+        private val frames: UplinkFrameRepository,
+        private val metricSampleRepository: MetricSampleRepository,
         private val encoder: LorawanPayloadEncoder,
 ) : ControlUnitService {
 
@@ -52,25 +62,25 @@ class ControlUnitServiceImpl(
         if (ss.isAdmin()) {
 
             name?.let {
-                return cur.findAllByName(it).map { e -> e.toDTO(templateService) }
+                return cur.findAllByName(it).map { e -> e.toDTO(templateService, protocolService) }
             }
-            return cur.findAll().map { it.toDTO(templateService) }
+            return cur.findAll().map { it.toDTO(templateService, protocolService) }
         }
 
         val userId = ss.getCurrentUserId()
 
         name?.let {
-            return cur.findAllByNameAndUser_UserId(it, userId).map { e -> e.toDTO(templateService) }
+            return cur.findAllByNameAndUser_UserId(it, userId).map { e -> e.toDTO(templateService, protocolService) }
         }
-        return cur.findAllByUser_UserId(userId).map { it.toDTO(templateService) }
+        return cur.findAllByUser_UserId(userId).map { it.toDTO(templateService, protocolService) }
     }
 
     override fun getControlUnit(id: Long): ControlUnitDTO? {
         if (ss.isAdmin()) {
-            return cur.findByIdOrNull(id)?.toDTO(templateService)
+            return cur.findByIdOrNull(id)?.toDTO(templateService, protocolService)
         }
         val userId = ss.getCurrentUserId()
-        return cur.findByIdAndUser_UserId(id, userId)?.toDTO(templateService)
+        return cur.findByIdAndUser_UserId(id, userId)?.toDTO(templateService, protocolService)
                 ?: throw EntityNotFoundException("ControlUnit $id not found")
     }
 
@@ -80,11 +90,11 @@ class ControlUnitServiceImpl(
     ): Page<ControlUnitDTO> {
         if (ss.isAdmin()) {
 
-            return cur.findAll(page).map { it.toDTO(templateService) }
+            return cur.findAll(page).map { it.toDTO(templateService, protocolService) }
         }
         val userId = ss.getCurrentUserId()
 
-        return cur.findAllByUser_UserId(userId, page).map { it.toDTO(templateService) }
+        return cur.findAllByUser_UserId(userId, page).map { it.toDTO(templateService, protocolService) }
     }
 
     @Transactional
@@ -118,7 +128,7 @@ class ControlUnitServiceImpl(
             cu.semanticLocation = newSemanticLocation
         }
 
-        return cur.save(cu).toDTO(templateService)
+        return cur.save(cu).toDTO(templateService, protocolService)
     }
 
     @Transactional
@@ -142,7 +152,7 @@ class ControlUnitServiceImpl(
         cu.user = currentUser
         cu.name = "La mia CU $decodedDevEui"
 
-        return cur.save(cu).toDTO(templateService)
+        return cur.save(cu).toDTO(templateService, protocolService)
     }
 
     override fun delete(id: Long) {
@@ -471,6 +481,16 @@ class ControlUnitServiceImpl(
             c.lastReportedConfigVersion = dto.configVersion
             cur.save(c)
 
+            saveFrame(
+                    cu = c,
+                    dto = dto,
+                    expected = expectedConfigVersion,
+                    status = FrameStatus.DISCARDED_CFG_MISMATCH,
+                    reason =
+                            "La CU dichiara CFG_VER ${dto.configVersion}, il server attende " +
+                                    "$expectedConfigVersion: la mappa degli slot attiva non e' nota",
+            )
+
             log.warn(
                     "Report scartato per CFG_VER disallineato: CU devEUI={} dichiara {}, il server attende {} (scartati finora: {})",
                     dto.devEui,
@@ -492,11 +512,12 @@ class ControlUnitServiceImpl(
             c.configMismatchCount = 0
             c.lastConfigMismatchAt = null
             c.lastReportedConfigVersion = null
+            c.decodeFailureCount = 0
             cur.save(c)
         }
 
         if (dto.rawPayload.isBlank()) {
-            log.warn("Payload vuoto ricevuto per DevEUI={}", dto.devEui)
+            discardFrame(c, dto, expectedConfigVersion, "Payload vuoto")
             return
         }
 
@@ -504,7 +525,7 @@ class ControlUnitServiceImpl(
                 try {
                     Base64.getDecoder().decode(dto.rawPayload)
                 } catch (e: Exception) {
-                    log.error("Errore decodifica Base64 per DevEUI={}: {}", dto.devEui, e.message)
+                    discardFrame(c, dto, expectedConfigVersion, "Base64 non valido: ${e.message}")
                     return
                 }
 
@@ -531,13 +552,17 @@ class ControlUnitServiceImpl(
                     }
 
             if (buffer.remaining() < bytesRequired) {
-                log.warn(
-                        "Payload incompleto per DevEUI={}. Byte richiesti: {}, rimasti: {}",
-                        dto.devEui,
-                        bytesRequired,
-                        buffer.remaining()
+                // Un report troncato si scarta per intero: e' il segno che il payload e'
+                // corrotto o che la mappa degli slot non corrisponde, e i byte gia' letti
+                // potrebbero essere disallineati quanto quelli che mancano.
+                discardFrame(
+                        c,
+                        dto,
+                        expectedConfigVersion,
+                        "Payload troncato allo slot ${sensor.sensorIndex} della MU ${mu.localId}: " +
+                                "servivano $bytesRequired byte, ne restavano ${buffer.remaining()}",
                 )
-                break
+                return
             }
 
             val measureData =
@@ -593,43 +618,133 @@ class ControlUnitServiceImpl(
 
         log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)
 
-        val measurementsToSave =
-                decodedMeasures.mapNotNull { data ->
-                    val sensor = data["sensorEntity"] as? Sensor ?: return@mapNotNull null
-                    val configType = data["configType"] as? String ?: return@mapNotNull null
+        // Il frame si registra prima delle misure, cosi' ogni misura puo' puntare al frame
+        // da cui arriva: dal byte ricevuto al valore mostrato c'e' una traccia sola.
+        val frame =
+                saveFrame(
+                        cu = c,
+                        dto = dto,
+                        expected = expectedConfigVersion,
+                        status = FrameStatus.DECODED,
+                        reason = null,
+                        decoded = mapOf("measures" to decodedMeasures.map { it - "sensorEntity" }),
+                )
 
-                    val timestamp =
-                            dto.timestamp?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
+        val timestamp = dto.timestamp?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
 
-                    var primary: Double? = null
-                    var secondary: Double? = null
+        val samples =
+                decodedMeasures.flatMap { data ->
+                    val sensor = data["sensorEntity"] as? Sensor ?: return@flatMap emptyList()
+                    val templateVersion = templateService.getDocument(sensor.modelName)?.version
 
-                    when (configType) {
-                        "avg-std", "average-std" -> {
-                            primary = (data["physicalValue"] as? Number)?.toDouble()
-                            secondary = (data["physicalVariance"] as? Number)?.toDouble()
-                        }
-                        "max-min" -> {
-                            primary = (data["rawMax"] as? Number)?.toDouble()
-                            secondary = (data["rawMin"] as? Number)?.toDouble()
-                        }
-                        "integral", "puntual" -> {
-                            primary = (data["rawValue"] as? Number)?.toDouble()
-                        }
+                    /** Una metrica diventa una riga; il grezzo resta accanto al valore. */
+                    fun sample(metric: String, value: Number?, raw: Number?, converted: Boolean) =
+                            value?.let {
+                                MetricSample(
+                                        sensor = sensor,
+                                        timestamp = timestamp,
+                                        metric = metric,
+                                        value = it.toDouble(),
+                                        rawValue = raw?.toDouble(),
+                                        converted = converted,
+                                        templateVersion = templateVersion,
+                                        uplinkFrame = frame,
+                                )
+                            }
+
+                    when (data["configType"] as? String) {
+                        "avg-std", "average-std" ->
+                                listOfNotNull(
+                                        sample(
+                                                Metric.MEAN,
+                                                data["physicalValue"] as? Number,
+                                                data["rawMean"] as? Number,
+                                                converted = true,
+                                        ),
+                                        // La varianza si propaga con la derivata locale, che il
+                                        // decoder fa solo per i modelli che conosce: dove non lo
+                                        // fa, il numero qui e' ancora quello elettrico.
+                                        sample(
+                                                Metric.VARIANCE,
+                                                data["physicalVariance"] as? Number,
+                                                data["rawVar"] as? Number,
+                                                converted = true,
+                                        ),
+                                )
+                        // Max, min e integrale viaggiano ancora grezzi: nessuna formula li
+                        // converte oggi, e dirlo e' piu' utile che fingere il contrario.
+                        "max-min" ->
+                                listOfNotNull(
+                                        sample(Metric.MAX, data["rawMax"] as? Number, data["rawMax"] as? Number, converted = false),
+                                        sample(Metric.MIN, data["rawMin"] as? Number, data["rawMin"] as? Number, converted = false),
+                                )
+                        "integral" ->
+                                listOfNotNull(
+                                        sample(Metric.INTEGRAL, data["rawValue"] as? Number, data["rawValue"] as? Number, converted = false)
+                                )
+                        "puntual" ->
+                                listOfNotNull(
+                                        sample(Metric.PUNCTUAL, data["rawValue"] as? Number, data["rawValue"] as? Number, converted = false)
+                                )
+                        else -> emptyList()
                     }
-
-                    Measurement(
-                            timestamp = timestamp,
-                            sensor = sensor,
-                            measurementType = configType, // <-- Assegnato qui
-                            valuePrimary = primary,
-                            valueSecondary = secondary
-                    )
                 }
 
-        measurementRepository.saveAll(measurementsToSave)
-        log.info("Misure salvate nel DB")
+        metricSampleRepository.saveAll(samples)
+        log.info("Misure salvate nel DB: {} metriche", samples.size)
     }
+
+    /**
+     * Registra un frame che non si e' potuto leggere e conta l'occorrenza.
+     *
+     * Si scarta tutto il report invece di salvare la parte compresa: se i byte non tornano,
+     * anche quelli letti prima potrebbero appartenere a slot diversi da quelli supposti, e
+     * una misura attribuita al sensore sbagliato e' peggio di una misura mancante. Il frame
+     * grezzo resta qui, quindi la decisione e' reversibile: quando si scopre perche' non
+     * tornava, lo si rilegge.
+     */
+    private fun discardFrame(
+            cu: ControlUnit,
+            dto: CuMeasuresUpdate,
+            expected: Int,
+            reason: String,
+    ) {
+        cu.decodeFailureCount += 1
+        cur.save(cu)
+        saveFrame(cu, dto, expected, FrameStatus.DISCARDED_DECODE_ERROR, reason)
+        log.warn(
+                "Report scartato per DevEUI={}: {} (scartati finora: {})",
+                dto.devEui,
+                reason,
+                cu.decodeFailureCount,
+        )
+    }
+
+    /** Il payload com'e' arrivato, con l'esito della lettura. Si conserva sempre. */
+    private fun saveFrame(
+            cu: ControlUnit,
+            dto: CuMeasuresUpdate,
+            expected: Int,
+            status: FrameStatus,
+            reason: String?,
+            decoded: Map<String, Any?>? = null,
+    ): UplinkFrame =
+            frames.save(
+                UplinkFrame(
+                        controlUnit = cu,
+                        devEui = dto.devEui,
+                        receivedAt =
+                                dto.timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                                        ?: OffsetDateTime.now(),
+                        fport = 48, // 0x30, report dati
+                        cfgVersion = dto.configVersion,
+                        expectedCfgVersion = expected,
+                        rawPayload = dto.rawPayload,
+                        decoded = decoded,
+                        status = status,
+                        failureReason = reason,
+                    )
+            )
     /**
      * Funzione di supporto per garantire l'idempotenza: Se la CU esiste la restituisce, altrimenti
      * ne crea una "orfana" pronta per il claim.

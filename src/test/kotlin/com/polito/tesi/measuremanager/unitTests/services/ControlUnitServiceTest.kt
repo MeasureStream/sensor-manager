@@ -13,11 +13,14 @@ import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
+import com.polito.tesi.measuremanager.repositories.MetricSampleRepository
+import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.template.MuModelService
+import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
@@ -38,9 +41,13 @@ class ControlUnitServiceTest {
     private val kcu = mockk<KafkaCuProducer>()
     private val ts = mockk<TemplateService>()
     private val muModel = mockk<MuModelService>()
+    // Il dizionario di protocollo serve solo allo stato online: qui basta che non risolva.
+    private val protocol = mockk<ProtocolService>(relaxed = true)
+    private val frames = mockk<UplinkFrameRepository>(relaxed = true)
+    private val samples = mockk<MetricSampleRepository>(relaxed = true)
     private val encoder = mockk<LorawanPayloadEncoder>()
 
-    private val service = ControlUnitServiceImpl(cur, mur, mr, sqr, ss, kcu, ts, muModel, encoder)
+    private val service = ControlUnitServiceImpl(cur, mur, mr, sqr, ss, kcu, ts, muModel, protocol, frames, samples, encoder)
 
     /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
     private fun mu0001(extendedId: Long, localId: Int) =

@@ -85,4 +85,10 @@ class ControlUnit {
 
     /** Ultimo CFG_VER dichiarato dalla CU: confrontato con [configVersion] dice di quanto e' fuori fase. */
     var lastReportedConfigVersion: Int? = null
+
+    /**
+     * Report scartati perche' non decodificabili: payload troncato o corrotto, base64 non
+     * valido. Diverso da [configMismatchCount], che conta il disallineamento di versione.
+     */
+    var decodeFailureCount: Long = 0
 }

@@ -25,6 +25,7 @@ import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
 import com.polito.tesi.measuremanager.repositories.SensorAlarmRepository
 import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
+import com.polito.tesi.measuremanager.template.DecodedMetric
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.ReportTruncated
@@ -753,6 +754,8 @@ class ControlUnitServiceImpl(
                         )
                 )
             }
+
+            updateLiveValue(sensor, decoded)
         }
 
         if (buffer.remaining() > 0) {
@@ -777,6 +780,33 @@ class ControlUnitServiceImpl(
                 if (noNewData > 0) ", $noNewData senza dati nuovi" else "",
                 if (notResponding > 0) ", $notResponding da sensori muti" else "",
         )
+    }
+
+    /**
+     * L'ultimo valore letto, sul sensore: e' quello che le schede delle MU mostrano.
+     *
+     * Le misure vivono in `metric_sample`, ma la scheda di una CU ne vuole una sola per
+     * sensore, l'ultima, e cercarla ogni volta significherebbe una query per sensore a ogni
+     * apertura della pagina. Questi due campi sono quella cache — esistevano gia' e il
+     * frontend li legge ancora, ma dopo il passaggio a `metric_sample` nessuno li scriveva
+     * piu': da li' gli zeri fissi nelle schede.
+     *
+     * La media e' la metrica giusta da mostrare; se il sensore non la trasmette si ripiega
+     * sul valore puntuale e poi sulla prima metrica letta. Il grezzo si scrive sempre, il
+     * valore fisico **solo se la conversione e' avvenuta davvero**: un numero non convertito
+     * accanto a «°C» sarebbe una misura inventata.
+     */
+    private fun updateLiveValue(sensor: Sensor, decoded: List<DecodedMetric>) {
+        val usable = decoded.filterNot { it.noNewData || it.notResponding }
+        val live =
+                usable.firstOrNull { it.metric == Metric.MEAN }
+                        ?: usable.firstOrNull { it.metric == Metric.PUNCTUAL }
+                                ?: usable.firstOrNull()
+                        ?: return
+
+        sensor.elecVal = live.raw
+        if (live.converted && live.value != null) sensor.physVal = live.value!!
+        // Il sensore e' un'entita' gestita dalla transazione: Hibernate scrive al commit.
     }
 
     /**

@@ -91,4 +91,46 @@ class ControlUnit {
      * valido. Diverso da [configMismatchCount], che conta il disallineamento di versione.
      */
     var decodeFailureCount: Long = 0
+
+    /**
+     * CMD_SEQ: numero dell'ultimo comando di configurazione inviato, nel prologo di blocco.
+     * Serve alla CU per riconoscere una ritrasmissione e non applicarla due volte. Viaggia su
+     * un byte, quindi va in wrap a 255 come CFG_VER.
+     */
+    var cmdSeq: Int = 0
+
+    /**
+     * ALARM_SEQ ed EVENT_SEQ dell'ultimo messaggio ricevuto. Sono progressivi: confrontarli
+     * con quello che arriva e' l'unico modo che il server ha di accorgersi di un allarme o di
+     * un evento perso per strada.
+     */
+    var lastAlarmSeq: Int? = null
+
+    var lastEventSeq: Int? = null
+
+    /**
+     * ALARM_SEQ dichiarato dalla CU nel poll 0x0B. Confrontato con [lastAlarmSeq] dice se un
+     * messaggio di allarme non e' mai arrivato: il poll lo rivela anche quando il 0xA0 si e'
+     * perso del tutto, che e' il caso in cui accorgersene serve davvero.
+     */
+    var reportedAlarmSeq: Int? = null
+
+    /** STATUS_SEQ dell'ultimo comando 0x12 ricevuto, per lo stesso controllo di continuita'. */
+    var lastStatusSeq: Int? = null
+
+    /**
+     * ProtoVer dichiarato nel poll 0x0B: 0x12 per il protocollo v1.2. Null finche' la CU
+     * non lo dichiara, cioe' finche' monta un firmware precedente. E' la condizione per
+     * dismettere le vecchie FPort: nessuna si tocca finche' esiste una CU senza questo campo.
+     */
+    var protocolVer: Int? = null
+
+    /**
+     * I due byte Status del poll, come sono arrivati. I significati non si salvano: si
+     * risolvono a ogni lettura con il dizionario di protocollo, cosi' un bit che domani
+     * acquista senso non richiede di rileggere lo storico.
+     */
+    var statusWord: Int? = null
+
+    var statusAt: java.time.OffsetDateTime? = null
 }

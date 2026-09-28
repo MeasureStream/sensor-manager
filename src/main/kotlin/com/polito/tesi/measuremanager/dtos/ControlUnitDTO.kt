@@ -89,6 +89,15 @@ data class ControlUnitDTO(
     /** Quando e' arrivato l'ultimo report scartato. */
     val lastConfigMismatchAt: java.time.OffsetDateTime?,
 
+    /**
+     * ProtoVer dichiarato nel poll: 18 (0x12) per il protocollo v1.2, null per i firmware
+     * precedenti. E' la condizione per dismettere le vecchie FPort.
+     */
+    val protocolVer: Int?,
+    /** I bit di stato alzati nell'ultimo poll, gia' tradotti dal dizionario di protocollo. */
+    val statusFlags: List<StatusFlagDTO>,
+    val statusAt: java.time.OffsetDateTime?,
+
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
     val measurementUnits: List<MeasurementUnitDTO> = listOf(),
 
@@ -136,6 +145,9 @@ fun ControlUnit.toDTO(
     decodeFailureCount = decodeFailureCount,
     lastReportedConfigVersion = lastReportedConfigVersion,
     lastConfigMismatchAt = lastConfigMismatchAt,
+    protocolVer = protocolVer,
+    statusFlags = protocol?.statusFlags(statusWord)?.map { it.toDTO() } ?: emptyList(),
+    statusAt = statusAt,
 
     lastFCnt = lastFCnt,
 
@@ -144,7 +156,7 @@ fun ControlUnit.toDTO(
     measurementUnits = run {
         var sensorOffset = 0
         measurementUnits.sortedBy { it.localId }.map { mu ->
-            val dto = mu.toDTO(templateService, sensorOffset)
+            val dto = mu.toDTO(templateService, sensorOffset, protocol)
             sensorOffset += mu.sensors.size
             dto
         }

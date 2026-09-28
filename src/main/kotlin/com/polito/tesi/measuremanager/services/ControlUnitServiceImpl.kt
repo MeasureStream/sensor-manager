@@ -21,10 +21,15 @@ import com.polito.tesi.measuremanager.entities.UplinkFrame
 import com.polito.tesi.measuremanager.entities.Metric
 import com.polito.tesi.measuremanager.entities.MetricSample
 import com.polito.tesi.measuremanager.repositories.MetricSampleRepository
+import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
+import com.polito.tesi.measuremanager.repositories.SensorAlarmRepository
 import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
+import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ProtocolService
+import com.polito.tesi.measuremanager.template.ReportDecoder
+import com.polito.tesi.measuremanager.template.ReportTruncated
+import com.polito.tesi.measuremanager.template.StatBitmap
 import com.polito.tesi.measuremanager.template.TemplateService
-import com.polito.tesi.measuremanager.utils.SensorDecoder
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
 import java.nio.ByteBuffer
@@ -51,6 +56,10 @@ class ControlUnitServiceImpl(
         private val protocolService: ProtocolService,
         private val frames: UplinkFrameRepository,
         private val metricSampleRepository: MetricSampleRepository,
+        private val reportDecoder: ReportDecoder,
+        private val snapshots: ConfigSnapshotService,
+        private val alarms: SensorAlarmRepository,
+        private val deviceEvents: DeviceEventRepository,
         private val encoder: LorawanPayloadEncoder,
 ) : ControlUnitService {
 
@@ -246,9 +255,15 @@ class ControlUnitServiceImpl(
 
         cur.save(cu)
 
-        val encoded = encoder.encodeSensorConfig(safeCommand)
+        // Una configurazione nuova e' una nuova epoca: CFG_VER sale, e l'istantanea registra
+        // quali slot erano attivi e con quali metriche. Senza, un report che arriva in ritardo
+        // di una configurazione non sarebbe piu' leggibile.
+        cu.configVersion++
+        cur.save(cu)
+        snapshots.take(cu)
 
-        kcu.sendDownlink(cu.deviceId, encoded)
+        encoder.encodePeriods(safeCommand, nextCmdSeq(cu), cu.transmissionInterval)
+                .forEach { kcu.sendDownlink(cu.deviceId, it) }
 
         return safeCommand
     }
@@ -264,8 +279,10 @@ class ControlUnitServiceImpl(
                         )
         cu.transmissionInterval = command.transmissionIndex
 
-        val encoded = encoder.encodeTransmissionConfig(command)
-        kcu.sendDownlink(cu.deviceId, encoded)
+        // La 0x24 non tocca i periodi dei sensori, quindi non cambia la mappa degli slot e
+        // non serve una nuova istantanea: cambia solo la cadenza con cui la CU trasmette.
+        encoder.encodeTransmissionConfig(command, nextCmdSeq(cu))
+                .forEach { kcu.sendDownlink(cu.deviceId, it) }
         cur.save(cu)
         return cu.toCUTransmissionCommandDTO()
     }
@@ -275,8 +292,12 @@ class ControlUnitServiceImpl(
      * sensori non e' piu' scritto qui. Un modello sconosciuto non e' piu' un errore: la MU
      * nasce senza slot e li riceve quando il modello viene pubblicato.
      */
-    fun createMuByModel(extendedId: Long, model: Int, localId: Int): MeasurementUnit =
-            muModelService.createMeasurementUnit(extendedId, model, localId)
+    fun createMuByModel(
+            extendedId: Long,
+            model: Int,
+            localId: Int,
+            major: Int? = null,
+    ): MeasurementUnit = muModelService.createMeasurementUnit(extendedId, model, localId, major)
 
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
@@ -293,10 +314,27 @@ class ControlUnitServiceImpl(
             var mu = mur.findByExtendedId(muDesc.extendedId)
 
             if (mu == null) {
-                mu = createMuByModel(muDesc.extendedId, muDesc.model, muDesc.localId)
+                mu = createMuByModel(muDesc.extendedId, muDesc.model, muDesc.localId, muDesc.major)
             } else {
+                // Una MU riprogrammata con un altro MAJOR puo' avere slot diversi. Non li si
+                // ricrea: portano configurazione e storico, e buttarli per un byte sarebbe
+                // peggio del disallineamento. Si registra la versione nuova e si dice che le
+                // due non corrispondono piu'.
+                if (muDesc.major != null && mu.modelMajor != null && mu.modelMajor != muDesc.major) {
+                    log.warn(
+                            "MU {} dichiara il modello 0x{} MAJOR {}, gli slot sono quelli del MAJOR {}: vanno rigenerati a mano",
+                            muDesc.extendedId,
+                            "%04X".format(muDesc.model),
+                            muDesc.major,
+                            mu.modelMajor,
+                    )
+                }
                 mu.model = muDesc.model
                 mu.localId = muDesc.localId
+                if (muDesc.major != null) mu.modelMajor = muDesc.major
+                // Una MU rimasta senza slot perche' il modello non era pubblicato li riceve
+                // ora, senza aspettare la prossima pubblicazione.
+                muModelService.materialize(mu)
             }
 
             mu.controlUnit = savedCu
@@ -322,9 +360,51 @@ class ControlUnitServiceImpl(
         cu.acPowered = c.acPowered
         cu.isCharging = c.isCharging
 
-        // Se hai un campo per lo stato grezzo o per il modello della CU
-        // cu.statusRaw = c.statusRaw
         cu.model = c.model
+        cu.statusWord = c.statusRaw
+        cu.statusAt = OffsetDateTime.now()
+
+        // ProtoVer: finche' una sola CU non lo dichiara, le vecchie FPort restano accese.
+        c.protocolVer?.let { cu.protocolVer = it }
+
+        // CFG_VER nel poll: dice se la configurazione inviata e' stata applicata davvero.
+        // E' un'informazione diversa da quella del report - qui non si perde nessuna misura,
+        // si scopre che un comando non e' arrivato a destinazione.
+        c.configVersion?.let { reported ->
+            cu.lastReportedConfigVersion = reported
+            val expected = (cu.configVersion and 0xFF).toInt()
+            if (reported != expected) {
+                log.warn(
+                        "CU devEUI={}: il poll dichiara CFG_VER {}, il server ha inviato {}: configurazione non applicata",
+                        c.devEui,
+                        reported,
+                        expected,
+                )
+            }
+        }
+
+        // ALARM_SEQ nel poll: e' l'unico modo di accorgersi di un allarme che non e' mai
+        // arrivato, perche' di quel messaggio non c'e' traccia da nessuna parte.
+        c.alarmSeq?.let { reported ->
+            cu.reportedAlarmSeq = reported
+            val known = cu.lastAlarmSeq
+            if (known != null && reported != known) {
+                log.warn(
+                        "CU devEUI={}: il poll dichiara ALARM_SEQ {}, l'ultimo allarme ricevuto era {}: messaggi di allarme persi",
+                        c.devEui,
+                        reported,
+                        known,
+                )
+            }
+        }
+
+        if (c.statusRaw != 0) {
+            log.info(
+                    "CU devEUI={}: stato {}",
+                    c.devEui,
+                    protocolService.statusFlags(c.statusRaw).joinToString { it.description },
+            )
+        }
 
         cur.save(cu)
     }
@@ -450,9 +530,27 @@ class ControlUnitServiceImpl(
                         .flatMap { mu -> mu.sensors.sortedBy { it.sensorIndex } }
                         .map { sensor -> MEASURE_TYPES.indexOf(sensor.configurationMeasure) }
 
-        // 5. Invia il comando via LoRaWAN / Kafka
-        val encodedPayload = encoder.encodeMeasureConfig(c.configVersion, sortedMeasures)
-        kcu.sendDownlink(c.deviceId, encodedPayload)
+        // 5. Istantanea della nuova epoca, poi i record della 0x23
+        snapshots.take(c)
+
+        var globalIndex = 0
+        val records =
+                c.measurementUnits
+                        .sortedBy { it.localId }
+                        .flatMap { mu -> mu.sensors.sortedBy { it.sensorIndex } }
+                        .map { sensor ->
+                            LorawanPayloadEncoder.SensorStatsRecord(
+                                    globalIndex = globalIndex++,
+                                    statBitmap = statBitmapOf(sensor.configurationMeasure),
+                                    // Nessun allarme armato finche' le soglie non arrivano dal
+                                    // frontend: un bit alzato qui vorrebbe dire una soglia in piu'
+                                    // nel payload, e sarebbe una soglia inventata.
+                                    alarmEnable = 0,
+                            )
+                        }
+
+        encoder.encodeStatsAndThresholds(nextCmdSeq(c), records)
+                .forEach { kcu.sendDownlink(c.deviceId, it) }
 
         // 6. Restituisci il risultato
         return dto
@@ -471,7 +569,15 @@ class ControlUnitServiceImpl(
         // dalla 256esima configurazione in poi nessun report risulterebbe piu' allineato.
         val expectedConfigVersion = (c.configVersion and 0xFF).toInt()
 
-        if (dto.configVersion != expectedConfigVersion) {
+        // Un CFG_VER diverso non significa piu' «illeggibile»: se il server conserva
+        // l'istantanea di quella configurazione, il report si legge con la mappa degli slot
+        // di allora. Si scarta solo quando quell'epoca non e' nota.
+        val snapshot =
+                if (dto.configVersion != expectedConfigVersion)
+                        snapshots.forWireVersion(c.id, dto.configVersion)
+                else null
+
+        if (dto.configVersion != expectedConfigVersion && snapshot == null) {
             // Il report resta scartato: senza sapere quale configurazione era attiva, quei byte
             // non sono decodificabili nemmeno in seguito. Ma non sparisce in silenzio: il
             // contatore dice quante misure si stanno perdendo e da quando, e l'interfaccia lo
@@ -502,7 +608,7 @@ class ControlUnitServiceImpl(
         }
 
         // Report allineato: se c'era un disallineamento aperto, e' rientrato.
-        if (c.configMismatchCount > 0) {
+        if (dto.configVersion == expectedConfigVersion && c.configMismatchCount > 0) {
             log.info(
                     "CU devEUI={} di nuovo allineata su CFG_VER {}: {} report erano stati scartati",
                     dto.devEui,
@@ -537,161 +643,140 @@ class ControlUnitServiceImpl(
                     mu.sensors.sortedBy { it.sensorIndex }.map { sensor -> Pair(mu, sensor) }
                 }
 
-        val decodedMeasures = mutableListOf<Map<String, Any?>>()
+        val timestamp = dto.timestamp?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
 
-        for ((mu, sensor) in sortedSensors) {
-            // Fallback di sicurezza su configurationMeasure
-            val configType = sensor.configurationMeasure?.lowercase() ?: "average-std"
-
-            // Calcolo byte richiesti in base a configType
-            val bytesRequired =
-                    when (configType) {
-                        "avg-std", "average-std", "max-min" -> 4
-                        "integral", "puntual" -> 2
-                        else -> 2
-                    }
-
-            if (buffer.remaining() < bytesRequired) {
-                // Un report troncato si scarta per intero: e' il segno che il payload e'
-                // corrotto o che la mappa degli slot non corrisponde, e i byte gia' letti
-                // potrebbero essere disallineati quanto quelli che mancano.
-                discardFrame(
-                        c,
-                        dto,
-                        expectedConfigVersion,
-                        "Payload troncato allo slot ${sensor.sensorIndex} della MU ${mu.localId}: " +
-                                "servivano $bytesRequired byte, ne restavano ${buffer.remaining()}",
-                )
-                return
-            }
-
-            val measureData =
-                    mutableMapOf<String, Any?>(
-                            "muLocalId" to mu.localId,
-                            "muExtendedId" to mu.extendedId,
-                            "sensorId" to sensor.id,
-                            "sensorIndex" to sensor.sensorIndex,
-                            "modelName" to sensor.modelName,
-                            "configType" to configType,
-                            "sensorEntity" to sensor
-                    )
-
-            when (configType) {
-                "avg-std", "average-std" -> {
-                    // In Kotlin/Java .short da signed value; con & 0xFFFF lo rendiamo uint16 puro
-                    // (0..65535)
-                    val rawMean = buffer.short.toInt() and 0xFFFF
-                    val rawVar = buffer.short.toInt() and 0xFFFF
-
-                    // DECODIFICA FISICA TRAMITE SENSOR DECODER
-                    val decoded = SensorDecoder.decode(sensor.modelName, rawMean, rawVar)
-
-                    measureData["status"] = decoded.status
-                    measureData["rawMean"] = rawMean
-                    measureData["rawVar"] = rawVar
-                    measureData["physicalValue"] = decoded.physicalValue
-                    measureData["physicalVariance"] = decoded.physicalVariance
-
-                    log.debug(
-                            "Sensore [MU:{}, Model:{}] -> Status: {}, PhysVal: {}, PhysVar: {}",
-                            mu.localId,
-                            sensor.modelName,
-                            decoded.status,
-                            decoded.physicalValue,
-                            decoded.physicalVariance
-                    )
-                }
-                "max-min" -> {
-                    val rawMax = buffer.short.toInt() and 0xFFFF
-                    val rawMin = buffer.short.toInt() and 0xFFFF
-                    measureData["rawMax"] = rawMax
-                    measureData["rawMin"] = rawMin
-                }
-                "integral", "puntual" -> {
-                    val rawVal = buffer.short.toInt() and 0xFFFF
-                    measureData["rawValue"] = rawVal
-                }
-            }
-
-            decodedMeasures.add(measureData)
-        }
-
-        log.info("Decodificate {} misure per DevEUI={}", decodedMeasures.size, dto.devEui)
-
-        // Il frame si registra prima delle misure, cosi' ogni misura puo' puntare al frame
-        // da cui arriva: dal byte ricevuto al valore mostrato c'e' una traccia sola.
+        // Il frame si registra prima delle misure, cosi' ogni misura punta al frame da cui
+        // arriva: dal byte ricevuto al valore mostrato c'e' una traccia sola.
         val frame =
                 saveFrame(
                         cu = c,
                         dto = dto,
                         expected = expectedConfigVersion,
-                        status = FrameStatus.DECODED,
-                        reason = null,
-                        decoded = mapOf("measures" to decodedMeasures.map { it - "sensorEntity" }),
+                        status =
+                                if (snapshot == null) FrameStatus.DECODED
+                                else FrameStatus.DECODED_WITH_SNAPSHOT,
+                        reason =
+                                snapshot?.let {
+                                    "Letto con l'istantanea della configurazione ${it.cfgVersion}"
+                                },
+                        // Cosa diceva l'header: senza, un report con meno metriche del
+                        // previsto sembrerebbe un errore di configurazione invece che un
+                        // ciclo in cui le EXTENDED non erano di turno.
+                        decoded =
+                                if (dto.content != null || dto.fragments > 1)
+                                        mapOf("content" to dto.content, "fragments" to dto.fragments)
+                                else null,
                 )
 
-        val timestamp = dto.timestamp?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
+        val samples = mutableListOf<MetricSample>()
+        var noNewData = 0
+        var notResponding = 0
 
-        val samples =
-                decodedMeasures.flatMap { data ->
-                    val sensor = data["sensorEntity"] as? Sensor ?: return@flatMap emptyList()
-                    val templateVersion = templateService.getDocument(sensor.modelName)?.version
-
-                    /** Una metrica diventa una riga; il grezzo resta accanto al valore. */
-                    fun sample(metric: String, value: Number?, raw: Number?, converted: Boolean) =
-                            value?.let {
-                                MetricSample(
-                                        sensor = sensor,
-                                        timestamp = timestamp,
-                                        metric = metric,
-                                        value = it.toDouble(),
-                                        rawValue = raw?.toDouble(),
-                                        converted = converted,
-                                        templateVersion = templateVersion,
-                                        uplinkFrame = frame,
+        // Ogni voce: lo slot da leggere e le metriche che porta. L'ordine e' quello del filo.
+        val plan: List<Pair<Sensor, List<String>>> =
+                if (snapshot == null) {
+                    sortedSensors.map { (_, sensor) ->
+                        sensor to
+                                reportDecoder.expectedMetrics(
+                                        sensor.configurationMeasure,
+                                        dto.content,
                                 )
-                            }
-
-                    when (data["configType"] as? String) {
-                        "avg-std", "average-std" ->
-                                listOfNotNull(
-                                        sample(
-                                                Metric.MEAN,
-                                                data["physicalValue"] as? Number,
-                                                data["rawMean"] as? Number,
-                                                converted = true,
-                                        ),
-                                        // La varianza si propaga con la derivata locale, che il
-                                        // decoder fa solo per i modelli che conosce: dove non lo
-                                        // fa, il numero qui e' ancora quello elettrico.
-                                        sample(
-                                                Metric.VARIANCE,
-                                                data["physicalVariance"] as? Number,
-                                                data["rawVar"] as? Number,
-                                                converted = true,
-                                        ),
+                    }
+                } else {
+                    val byId = sortedSensors.associate { (_, sensor) -> sensor.id to sensor }
+                    snapshot.slots.map { slot ->
+                        val sensorId = (slot["sensorId"] as? Number)?.toLong()
+                        val sensor = byId[sensorId]
+                        if (sensor == null) {
+                            // Uno slot dell'istantanea non esiste piu': da qui in poi ogni
+                            // lettura sarebbe attribuita al sensore sbagliato.
+                            discardFrame(
+                                    c,
+                                    dto,
+                                    expectedConfigVersion,
+                                    "L'istantanea della configurazione ${dto.configVersion} cita il " +
+                                            "sensore $sensorId, che non esiste piu'",
+                            )
+                            return
+                        }
+                        sensor to
+                                reportDecoder.expectedMetrics(
+                                        slot["configurationMeasure"] as? String,
+                                        dto.content,
                                 )
-                        // Max, min e integrale viaggiano ancora grezzi: nessuna formula li
-                        // converte oggi, e dirlo e' piu' utile che fingere il contrario.
-                        "max-min" ->
-                                listOfNotNull(
-                                        sample(Metric.MAX, data["rawMax"] as? Number, data["rawMax"] as? Number, converted = false),
-                                        sample(Metric.MIN, data["rawMin"] as? Number, data["rawMin"] as? Number, converted = false),
-                                )
-                        "integral" ->
-                                listOfNotNull(
-                                        sample(Metric.INTEGRAL, data["rawValue"] as? Number, data["rawValue"] as? Number, converted = false)
-                                )
-                        "puntual" ->
-                                listOfNotNull(
-                                        sample(Metric.PUNCTUAL, data["rawValue"] as? Number, data["rawValue"] as? Number, converted = false)
-                                )
-                        else -> emptyList()
                     }
                 }
 
+        if (snapshot != null) {
+            log.info(
+                    "CU devEUI={}: report letto con l'istantanea della configurazione {} ({} slot)",
+                    dto.devEui,
+                    snapshot.cfgVersion,
+                    snapshot.slots.size,
+            )
+        }
+
+        for ((sensor, metrics) in plan) {
+            val record = templateService.getDocument(sensor.modelName)
+            val template = templateService.getTemplate(sensor.modelName)
+            val slotLabel = "slot ${sensor.sensorIndex} (${sensor.modelName})"
+
+            val decoded =
+                    try {
+                        reportDecoder.decodeSlot(buffer, template, metrics, slotLabel)
+                    } catch (e: ReportTruncated) {
+                        discardFrame(c, dto, expectedConfigVersion, e.message ?: "Report troncato")
+                        return
+                    }
+
+            decoded.forEach { metric ->
+                // Le sentinelle non sono misure: si contano e non si salvano, altrimenti
+                // 65535 finirebbe nei grafici come se fosse un valore letto.
+                if (metric.notResponding) {
+                    notResponding++
+                    return@forEach
+                }
+                if (metric.noNewData) {
+                    noNewData++
+                    return@forEach
+                }
+                samples.add(
+                        MetricSample(
+                                sensor = sensor,
+                                timestamp = timestamp,
+                                metric = metric.metric,
+                                value = metric.value,
+                                rawValue = metric.raw,
+                                converted = metric.converted,
+                                templateVersion = record?.version,
+                                uplinkFrame = frame,
+                        )
+                )
+            }
+        }
+
+        if (buffer.remaining() > 0) {
+            // Byte in piu' rispetto a quelli descritti: la mappa degli slot non corrisponde a
+            // quella con cui la CU ha trasmesso, quindi anche cio' che si e' letto e' dubbio.
+            discardFrame(
+                    c,
+                    dto,
+                    expectedConfigVersion,
+                    "Il report ha ${buffer.remaining()} byte oltre le metriche attese: " +
+                            "la configurazione degli slot non corrisponde",
+            )
+            return
+        }
+
         metricSampleRepository.saveAll(samples)
-        log.info("Misure salvate nel DB: {} metriche", samples.size)
+        log.info(
+                "Misure salvate: {} metriche da {} slot{}{}{}",
+                samples.size,
+                plan.size,
+                if (dto.fragments > 1) " (${dto.fragments} frammenti)" else "",
+                if (noNewData > 0) ", $noNewData senza dati nuovi" else "",
+                if (notResponding > 0) ", $notResponding da sensori muti" else "",
+        )
     }
 
     /**
@@ -736,7 +821,7 @@ class ControlUnitServiceImpl(
                         receivedAt =
                                 dto.timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
                                         ?: OffsetDateTime.now(),
-                        fport = 48, // 0x30, report dati
+                        fport = dto.fport,
                         cfgVersion = dto.configVersion,
                         expectedCfgVersion = expected,
                         rawPayload = dto.rawPayload,
@@ -745,6 +830,107 @@ class ControlUnitServiceImpl(
                         failureReason = reason,
                     )
             )
+
+    /**
+     * Un messaggio che non si e' potuto leggere prima ancora di arrivare alle metriche:
+     * frammenti che non si ricompongono, header illeggibile, porta dismessa. Vale la stessa
+     * regola dei report scartati - il grezzo resta, il contatore lo dichiara - perche' un
+     * messaggio perso in silenzio e' esattamente cio' che il registro dei frame evita.
+     */
+    @Transactional
+    fun recordUndecodableFrame(
+            devEui: Long,
+            fport: Int,
+            rawPayload: String,
+            reason: String,
+            cfgVersion: Int? = null,
+            timestamp: String? = null,
+    ) {
+        val cu = cur.findByDevEui(devEui)
+        if (cu == null) {
+            log.warn("Control Unit non trovata per DevEUI={}: {} non registrato", devEui, reason)
+            return
+        }
+        cu.decodeFailureCount += 1
+        cur.save(cu)
+        frames.save(
+                UplinkFrame(
+                        controlUnit = cu,
+                        devEui = devEui,
+                        receivedAt =
+                                timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                                        ?: OffsetDateTime.now(),
+                        fport = fport,
+                        cfgVersion = cfgVersion,
+                        expectedCfgVersion = (cu.configVersion and 0xFF).toInt(),
+                        rawPayload = rawPayload,
+                        status = FrameStatus.DISCARDED_DECODE_ERROR,
+                        failureReason = reason,
+                )
+        )
+        log.warn("DevEUI={}: {} (scartati finora: {})", devEui, reason, cu.decodeFailureCount)
+    }
+    override fun getAlarms(controlUnitId: Long): List<AlarmDTO> {
+        ownedControlUnit(controlUnitId)
+        return alarms.findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map { it.toDTO() }
+    }
+
+    override fun getEvents(controlUnitId: Long): List<DeviceEventDTO> {
+        ownedControlUnit(controlUnitId)
+        return deviceEvents.findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map {
+            it.toDTO()
+        }
+    }
+
+    override fun getFrames(controlUnitId: Long): List<UplinkFrameDTO> {
+        ownedControlUnit(controlUnitId)
+        return frames.findTop50ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map { it.toDTO() }
+    }
+
+    @Transactional
+    override fun acknowledgeFrames(controlUnitId: Long): ControlUnitDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        val now = OffsetDateTime.now()
+        val marked =
+                frames.acknowledgeAll(controlUnitId, now) +
+                        alarms.acknowledgeAll(controlUnitId, now) +
+                        deviceEvents.acknowledgeAll(controlUnitId, now)
+
+        cu.configMismatchCount = 0
+        cu.decodeFailureCount = 0
+        cu.lastConfigMismatchAt = null
+        cu.lastReportedConfigVersion = null
+
+        log.info(
+                "CU {}: presa in carico di {} fra frame, allarmi ed eventi; contatori azzerati",
+                controlUnitId,
+                marked,
+        )
+        return cur.save(cu).toDTO(templateService, protocolService)
+    }
+
+    /**
+     * Il numero del prossimo comando di configurazione. Viaggia su un byte nel prologo di
+     * blocco e va in wrap a 255: la CU lo confronta per riconoscere una ritrasmissione.
+     */
+    private fun nextCmdSeq(cu: ControlUnit): Int {
+        cu.cmdSeq = (cu.cmdSeq + 1) and 0xFF
+        cur.save(cu)
+        return cu.cmdSeq
+    }
+
+    /** La `Stat bitmap` della 0x23. La traduzione sta in [StatBitmap], non qui. */
+    private fun statBitmapOf(configurationMeasure: String?): Int =
+            StatBitmap.of(configurationMeasure)
+
+    /** La CU se chi chiede puo' vederla: un utente vede solo le proprie. */
+    private fun ownedControlUnit(id: Long): ControlUnit {
+        val cu =
+                if (ss.isAdmin()) cur.findByIdOrNull(id)
+                else cur.findByIdAndUser_UserId(id, ss.getCurrentUserId())
+        return cu ?: throw EntityNotFoundException("Control Unit $id non trovata")
+    }
+
     /**
      * Funzione di supporto per garantire l'idempotenza: Se la CU esiste la restituisce, altrimenti
      * ne crea una "orfana" pronta per il claim.

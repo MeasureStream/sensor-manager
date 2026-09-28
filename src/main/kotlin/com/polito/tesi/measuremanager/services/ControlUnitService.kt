@@ -18,6 +18,21 @@ interface ControlUnitService {
 
     fun claimControlUnit(hash: String): ControlUnitDTO
 
+    /** Gli allarmi ricevuti da una CU, dal piu' recente. */
+    fun getAlarms(controlUnitId: Long): List<AlarmDTO>
+
+    /** Gli eventi di diagnostica ricevuti da una CU, dal piu' recente. */
+    fun getEvents(controlUnitId: Long): List<DeviceEventDTO>
+
+    /** Gli ultimi frame ricevuti da una CU, con l'esito della lettura. */
+    fun getFrames(controlUnitId: Long): List<UplinkFrameDTO>
+
+    /**
+     * Presa in carico: i contatori tornano a zero e i frame restano, marcati come visti.
+     * E' l'utente a decidere quando un problema e' stato guardato, non il server.
+     */
+    fun acknowledgeFrames(controlUnitId: Long): ControlUnitDTO
+
     fun onJoinNotification(c: CuJoinNotification)
 
     fun onStatusUpdate(c: CuStatusUpdate)

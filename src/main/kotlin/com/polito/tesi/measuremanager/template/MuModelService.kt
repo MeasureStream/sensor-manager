@@ -32,9 +32,10 @@ class MuModelService(
     /**
      * Il modello di MU corrispondente al codice dichiarato dal dispositivo.
      *
-     * Finche' la notifica di topologia (0x10) non porta anche la versione, si prende il MAJOR
-     * piu' alto pubblicato: e' l'unica scelta possibile, e va rivista appena la versione
-     * arriva sul filo.
+     * Con la notifica 0x11 il MAJOR arriva sul filo e si usa quello: e' la versione con cui
+     * la MU e' stata programmata, e quindi l'unica con cui i suoi slot si leggono. Con la
+     * vecchia 0x10, che non lo porta, resta il MAJOR piu' alto pubblicato — giusto finche'
+     * ne esiste una versione sola.
      */
     fun resolveModel(model: Int, major: Int? = null): MuModelDocument? {
         val record =
@@ -50,12 +51,18 @@ class MuModelService(
     }
 
     /** Crea la MU e, se il modello e' risolto, i suoi slot. */
-    fun createMeasurementUnit(extendedId: Long, model: Int, localId: Int): MeasurementUnit {
+    fun createMeasurementUnit(
+            extendedId: Long,
+            model: Int,
+            localId: Int,
+            major: Int? = null,
+    ): MeasurementUnit {
         val mu =
                 MeasurementUnit().apply {
                     this.extendedId = extendedId
                     this.model = model
                     this.localId = localId
+                    this.modelMajor = major
                     this.sensors = mutableListOf()
                 }
         materialize(mu)
@@ -68,16 +75,17 @@ class MuModelService(
      */
     fun materialize(mu: MeasurementUnit): Boolean {
         if (mu.sensors.isNotEmpty()) return false
-        val document = resolveModel(mu.model) ?: return false
+        val document = resolveModel(mu.model, mu.modelMajor) ?: return false
 
         document.slots.sortedBy { it.index }.forEach { slot ->
             mu.sensors.add(buildSensor(mu, slot))
         }
 
         logger.info(
-                "MU {} modello 0x{}: creati {} slot dal template {}",
+                "MU {} modello 0x{} MAJOR {}: creati {} slot dal template {}",
                 mu.extendedId,
                 "%04X".format(mu.model),
+                mu.modelMajor ?: "piu' alto pubblicato",
                 mu.sensors.size,
                 document.templateVersion ?: "?",
         )
@@ -119,7 +127,13 @@ class MuModelService(
     fun onTemplatePublished(event: TemplatePublished) {
         if (event.kind != TemplateKind.MU) return
 
-        val pending = mur.findAllByModel(event.keyId).filter { it.sensors.isEmpty() }
+        // Solo le MU che aspettavano proprio questa versione: una MU che dichiara il MAJOR 2
+        // non va riempita con gli slot del MAJOR 1 appena pubblicato.
+        val major = event.version.substringBefore('.').toIntOrNull()
+        val pending =
+                mur.findAllByModel(event.keyId).filter {
+                    it.sensors.isEmpty() && (it.modelMajor == null || it.modelMajor == major)
+                }
         if (pending.isEmpty()) return
 
         pending.forEach { mu ->

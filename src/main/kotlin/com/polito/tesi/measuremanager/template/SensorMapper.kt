@@ -8,7 +8,10 @@ import com.polito.tesi.measuremanager.entities.Sensor
 import org.springframework.stereotype.Component
 
 @Component
-class SensorMapper(private val templateService: TemplateService) {
+class SensorMapper(
+    private val templateService: TemplateService,
+    private val protocolService: ProtocolService,
+) {
     /**
      * Converte un singolo Sensor in SensorDTO recuperando il template.
      * Delega a Sensor.toDTO, così un template mancante non solleva eccezioni neanche qui.
@@ -16,16 +19,10 @@ class SensorMapper(private val templateService: TemplateService) {
     fun toSensorDTO(sensor: Sensor): SensorDTO = sensor.toDTO(templateService)
 
     /**
-     * Converte la MeasurementUnit e mappa la lista di sensori usando il metodo sopra
+     * Converte la MeasurementUnit delegando alla stessa `toDTO` usata dentro la CU: una MU
+     * vista da sola e una vista dentro la sua CU devono avere la stessa forma, altrimenti
+     * l'interfaccia trova campi diversi a seconda di dove ha chiesto.
      */
-    fun toUnitDTO(unit: MeasurementUnit): MeasurementUnitDTO {
-        return MeasurementUnitDTO(
-            id = unit.id,
-            extendedId = unit.extendedId,
-            localId = unit.localId,
-            model = unit.model,
-            controlUnitId = unit.controlUnit?.id,
-            sensors = unit.sensors.map { toSensorDTO(it) },
-        )
-    }
+    fun toUnitDTO(unit: MeasurementUnit): MeasurementUnitDTO =
+        unit.toDTO(templateService, protocol = protocolService)
 }

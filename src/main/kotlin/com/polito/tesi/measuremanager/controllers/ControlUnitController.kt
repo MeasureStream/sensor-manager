@@ -6,6 +6,9 @@ import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.dtos.MeasureCUConfigRequest
+import com.polito.tesi.measuremanager.dtos.AlarmDTO
+import com.polito.tesi.measuremanager.dtos.DeviceEventDTO
+import com.polito.tesi.measuremanager.dtos.UplinkFrameDTO
 import com.polito.tesi.measuremanager.services.ControlUnitService
 import jakarta.validation.Valid
 import org.slf4j.LoggerFactory
@@ -53,6 +56,31 @@ class ControlUnitController(
     }
 
     @ResponseStatus(HttpStatus.ACCEPTED)
+    /** Gli allarmi ricevuti da questa CU, con le condizioni gia' risolte in testo. */
+    @GetMapping("/{id}/alarms")
+    fun alarms(@PathVariable id: Long): List<AlarmDTO> = cs.getAlarms(id)
+
+    /** Gli eventi di diagnostica: guasti della catena di acquisizione, reset, throttling. */
+    @GetMapping("/{id}/events")
+    fun events(@PathVariable id: Long): List<DeviceEventDTO> = cs.getEvents(id)
+
+    /**
+     * I report ricevuti da questa CU con l'esito della lettura: serve alla scheda
+     * diagnostica per mostrare cosa e' stato scartato e perche'.
+     */
+    @GetMapping("/{id}/frames")
+    fun frames(@PathVariable id: Long): List<UplinkFrameDTO> {
+        log.info("Richiesta dei frame della Control Unit {}", id)
+        return cs.getFrames(id)
+    }
+
+    /** Presa in carico: azzera i contatori dei report scartati, i frame restano. */
+    @PostMapping("/{id}/frames/acknowledge")
+    fun acknowledgeFrames(@PathVariable id: Long): ControlUnitDTO {
+        log.info("Presa in carico dei report scartati della Control Unit {}", id)
+        return cs.acknowledgeFrames(id)
+    }
+
     @PostMapping("/polling", "/polling/")
     fun configureCU(@RequestBody command: CUConfigCommandDTO) {
         log.info("Ricevuto comando POLLING per EUI: {}", command.devEui)

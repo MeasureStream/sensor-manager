@@ -27,4 +27,16 @@ class MeasurementUnit {
     @ManyToOne
     @JoinColumn( nullable = true)
     var controlUnit: ControlUnit? = null
+
+    /**
+     * MAJOR del modello dichiarato dalla MU nella notifica 0x11. E' la versione con cui vanno
+     * letti i suoi slot: prima si prendeva il MAJOR piu' alto pubblicato, che e' giusto solo
+     * finche' esiste una versione sola. Null quando arriva la vecchia 0x10, che non lo porta.
+     */
+    var modelMajor: Int? = null
+
+    /** Parola di stato dal comando 0x12: bit 0-6 dalla MU sul bus UART, bit 7-9 dalla CU. */
+    var statusWord: Int? = null
+
+    var statusAt: java.time.OffsetDateTime? = null
 }

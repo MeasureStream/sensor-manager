@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.kafka
 
 import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
+import com.polito.tesi.measuremanager.uplink.FPort
 import java.io.ByteArrayOutputStream
 import org.springframework.stereotype.Component
 
@@ -42,7 +43,7 @@ class LorawanPayloadEncoder {
                         (setting1 and 0xFF).toByte(),
                         (command1 and 0xFF).toByte(),
                 )
-        return listOf(EncodedPayload(bytes, fPort = 0x0A))
+        return listOf(EncodedPayload(bytes, fPort = FPort.CU_CONFIG))
     }
 
     /**
@@ -67,7 +68,7 @@ class LorawanPayloadEncoder {
             out.write(offset and 0xFF)
             if (index == 0) out.write(transmissionIndex and 0xFF)
             chunk.forEach { out.write(it and 0xFF) }
-            EncodedPayload(out.toByteArray(), fPort = 0x21)
+            EncodedPayload(out.toByteArray(), fPort = FPort.PERIODS)
         }
     }
 
@@ -97,7 +98,7 @@ class LorawanPayloadEncoder {
             writeUInt16(out, stopHours)
             out.write(transmissionIndex and 0xFF)
             chunk.forEach { out.write(it and 0xFF) }
-            EncodedPayload(out.toByteArray(), fPort = 0x22)
+            EncodedPayload(out.toByteArray(), fPort = FPort.SCHEDULE)
         }
     }
 
@@ -118,7 +119,7 @@ class LorawanPayloadEncoder {
         writeUInt16(out, startHours)
         writeUInt16(out, stopHours)
         out.write(transmissionIndex and 0xFF)
-        return listOf(EncodedPayload(out.toByteArray(), fPort = 0x24))
+        return listOf(EncodedPayload(out.toByteArray(), fPort = FPort.SHORT_SCHEDULE))
     }
 
     /**
@@ -138,7 +139,7 @@ class LorawanPayloadEncoder {
 
         fun flush() {
             if (current.isEmpty()) return
-            payloads.add(EncodedPayload(buildStatsBlock(cmdSeq, current), fPort = 0x23))
+            payloads.add(EncodedPayload(buildStatsBlock(cmdSeq, current), fPort = FPort.STATS))
             current = mutableListOf()
             size = 3
         }

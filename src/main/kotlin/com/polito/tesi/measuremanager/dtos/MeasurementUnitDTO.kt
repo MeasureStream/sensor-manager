@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.dtos
 
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
+import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
@@ -11,6 +12,11 @@ data class MeasurementUnitDTO(
     val extendedId: Long,
     val localId: Int,
     val model: Int,
+    /** MAJOR del modello dichiarato dalla MU nella notifica 0x11; null con la vecchia 0x10. */
+    val modelMajor: Int? = null,
+    /** I bit di stato dell'ultimo comando 0x12, gia' tradotti. */
+    val statusFlags: List<StatusFlagDTO> = emptyList(),
+    val statusAt: java.time.OffsetDateTime? = null,
     // Torniamo solo l'ID della CU per evitare ricorsioni infinite nel JSON
     val controlUnitId: Long?,
     // Lista dei sensori collegati
@@ -23,11 +29,18 @@ data class MeasurementUnitDTO(
  * il limite di MAX_SENSORS_PER_CU. Con il default 0 (MU fuori dal contesto CU)
  * tutti i sensori risultano configurabili (max 12 per MU < 48).
  */
-fun MeasurementUnit.toDTO(templateService: TemplateService, sensorOffset: Int = 0) = MeasurementUnitDTO(
+fun MeasurementUnit.toDTO(
+    templateService: TemplateService,
+    sensorOffset: Int = 0,
+    protocol: ProtocolService? = null,
+) = MeasurementUnitDTO(
     id = id,
     extendedId = extendedId,
     localId = localId,
     model = model,
+    modelMajor = modelMajor,
+    statusFlags = protocol?.muStatusFlags(statusWord)?.map { it.toDTO() } ?: emptyList(),
+    statusAt = statusAt,
     controlUnitId = controlUnit?.id,
     // Passiamo il servizio alla funzione toDTO di ogni sensore.
     // I sensori vengono contati in ordine di sensorIndex: quelli oltre il 48° della CU

@@ -1,6 +1,6 @@
 package com.polito.tesi.measuremanager.services
 
-import com.polito.tesi.measuremanager.dtos.CuAlarmUpdate
+import com.polito.tesi.measuremanager.dtos.LoraUplink
 import com.polito.tesi.measuremanager.entities.*
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
@@ -33,7 +33,7 @@ class AlarmService(
     private val log = LoggerFactory.getLogger(AlarmService::class.java)
 
     @Transactional
-    fun onAlarms(dto: CuAlarmUpdate) {
+    fun onAlarms(dto: LoraUplink) {
         val cu = cur.findByDevEui(dto.devEui) ?: return unknownCu(dto)
         val bytes = decodePayload(dto) ?: return
 
@@ -91,7 +91,7 @@ class AlarmService(
     }
 
     @Transactional
-    fun onEvents(dto: CuAlarmUpdate) {
+    fun onEvents(dto: LoraUplink) {
         val cu = cur.findByDevEui(dto.devEui) ?: return unknownCu(dto)
         val bytes = decodePayload(dto) ?: return
 
@@ -161,7 +161,7 @@ class AlarmService(
         return entry?.get("description")?.toString()
     }
 
-    private fun decodePayload(dto: CuAlarmUpdate): ByteArray? =
+    private fun decodePayload(dto: LoraUplink): ByteArray? =
             try {
                 Base64.getDecoder().decode(dto.rawPayload)
             } catch (e: Exception) {
@@ -169,7 +169,7 @@ class AlarmService(
                 null
             }
 
-    private fun timestampOf(dto: CuAlarmUpdate): OffsetDateTime =
+    private fun timestampOf(dto: LoraUplink): OffsetDateTime =
             dto.timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
                     ?: OffsetDateTime.now()
 
@@ -191,7 +191,7 @@ class AlarmService(
         }
     }
 
-    private fun unknownCu(dto: CuAlarmUpdate) {
+    private fun unknownCu(dto: LoraUplink) {
         log.warn("Control Unit non trovata per DevEUI={}: messaggio ignorato", dto.devEui)
     }
 }

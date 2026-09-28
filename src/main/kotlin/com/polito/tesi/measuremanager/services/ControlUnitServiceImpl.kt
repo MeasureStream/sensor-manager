@@ -28,6 +28,7 @@ import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.ReportTruncated
+import com.polito.tesi.measuremanager.template.StatBitmap
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
@@ -291,8 +292,12 @@ class ControlUnitServiceImpl(
      * sensori non e' piu' scritto qui. Un modello sconosciuto non e' piu' un errore: la MU
      * nasce senza slot e li riceve quando il modello viene pubblicato.
      */
-    fun createMuByModel(extendedId: Long, model: Int, localId: Int): MeasurementUnit =
-            muModelService.createMeasurementUnit(extendedId, model, localId)
+    fun createMuByModel(
+            extendedId: Long,
+            model: Int,
+            localId: Int,
+            major: Int? = null,
+    ): MeasurementUnit = muModelService.createMeasurementUnit(extendedId, model, localId, major)
 
     @Transactional
     override fun onJoinNotification(c: CuJoinNotification) {
@@ -309,10 +314,27 @@ class ControlUnitServiceImpl(
             var mu = mur.findByExtendedId(muDesc.extendedId)
 
             if (mu == null) {
-                mu = createMuByModel(muDesc.extendedId, muDesc.model, muDesc.localId)
+                mu = createMuByModel(muDesc.extendedId, muDesc.model, muDesc.localId, muDesc.major)
             } else {
+                // Una MU riprogrammata con un altro MAJOR puo' avere slot diversi. Non li si
+                // ricrea: portano configurazione e storico, e buttarli per un byte sarebbe
+                // peggio del disallineamento. Si registra la versione nuova e si dice che le
+                // due non corrispondono piu'.
+                if (muDesc.major != null && mu.modelMajor != null && mu.modelMajor != muDesc.major) {
+                    log.warn(
+                            "MU {} dichiara il modello 0x{} MAJOR {}, gli slot sono quelli del MAJOR {}: vanno rigenerati a mano",
+                            muDesc.extendedId,
+                            "%04X".format(muDesc.model),
+                            muDesc.major,
+                            mu.modelMajor,
+                    )
+                }
                 mu.model = muDesc.model
                 mu.localId = muDesc.localId
+                if (muDesc.major != null) mu.modelMajor = muDesc.major
+                // Una MU rimasta senza slot perche' il modello non era pubblicato li riceve
+                // ora, senza aspettare la prossima pubblicazione.
+                muModelService.materialize(mu)
             }
 
             mu.controlUnit = savedCu
@@ -338,9 +360,51 @@ class ControlUnitServiceImpl(
         cu.acPowered = c.acPowered
         cu.isCharging = c.isCharging
 
-        // Se hai un campo per lo stato grezzo o per il modello della CU
-        // cu.statusRaw = c.statusRaw
         cu.model = c.model
+        cu.statusWord = c.statusRaw
+        cu.statusAt = OffsetDateTime.now()
+
+        // ProtoVer: finche' una sola CU non lo dichiara, le vecchie FPort restano accese.
+        c.protocolVer?.let { cu.protocolVer = it }
+
+        // CFG_VER nel poll: dice se la configurazione inviata e' stata applicata davvero.
+        // E' un'informazione diversa da quella del report - qui non si perde nessuna misura,
+        // si scopre che un comando non e' arrivato a destinazione.
+        c.configVersion?.let { reported ->
+            cu.lastReportedConfigVersion = reported
+            val expected = (cu.configVersion and 0xFF).toInt()
+            if (reported != expected) {
+                log.warn(
+                        "CU devEUI={}: il poll dichiara CFG_VER {}, il server ha inviato {}: configurazione non applicata",
+                        c.devEui,
+                        reported,
+                        expected,
+                )
+            }
+        }
+
+        // ALARM_SEQ nel poll: e' l'unico modo di accorgersi di un allarme che non e' mai
+        // arrivato, perche' di quel messaggio non c'e' traccia da nessuna parte.
+        c.alarmSeq?.let { reported ->
+            cu.reportedAlarmSeq = reported
+            val known = cu.lastAlarmSeq
+            if (known != null && reported != known) {
+                log.warn(
+                        "CU devEUI={}: il poll dichiara ALARM_SEQ {}, l'ultimo allarme ricevuto era {}: messaggi di allarme persi",
+                        c.devEui,
+                        reported,
+                        known,
+                )
+            }
+        }
+
+        if (c.statusRaw != 0) {
+            log.info(
+                    "CU devEUI={}: stato {}",
+                    c.devEui,
+                    protocolService.statusFlags(c.statusRaw).joinToString { it.description },
+            )
+        }
 
         cur.save(cu)
     }
@@ -595,17 +659,28 @@ class ControlUnitServiceImpl(
                                 snapshot?.let {
                                     "Letto con l'istantanea della configurazione ${it.cfgVersion}"
                                 },
-                        decoded = null,
+                        // Cosa diceva l'header: senza, un report con meno metriche del
+                        // previsto sembrerebbe un errore di configurazione invece che un
+                        // ciclo in cui le EXTENDED non erano di turno.
+                        decoded =
+                                if (dto.content != null || dto.fragments > 1)
+                                        mapOf("content" to dto.content, "fragments" to dto.fragments)
+                                else null,
                 )
 
         val samples = mutableListOf<MetricSample>()
         var noNewData = 0
+        var notResponding = 0
 
         // Ogni voce: lo slot da leggere e le metriche che porta. L'ordine e' quello del filo.
         val plan: List<Pair<Sensor, List<String>>> =
                 if (snapshot == null) {
                     sortedSensors.map { (_, sensor) ->
-                        sensor to reportDecoder.expectedMetrics(sensor.configurationMeasure)
+                        sensor to
+                                reportDecoder.expectedMetrics(
+                                        sensor.configurationMeasure,
+                                        dto.content,
+                                )
                     }
                 } else {
                     val byId = sortedSensors.associate { (_, sensor) -> sensor.id to sensor }
@@ -626,7 +701,8 @@ class ControlUnitServiceImpl(
                         }
                         sensor to
                                 reportDecoder.expectedMetrics(
-                                        slot["configurationMeasure"] as? String
+                                        slot["configurationMeasure"] as? String,
+                                        dto.content,
                                 )
                     }
                 }
@@ -654,6 +730,12 @@ class ControlUnitServiceImpl(
                     }
 
             decoded.forEach { metric ->
+                // Le sentinelle non sono misure: si contano e non si salvano, altrimenti
+                // 65535 finirebbe nei grafici come se fosse un valore letto.
+                if (metric.notResponding) {
+                    notResponding++
+                    return@forEach
+                }
                 if (metric.noNewData) {
                     noNewData++
                     return@forEach
@@ -688,10 +770,12 @@ class ControlUnitServiceImpl(
 
         metricSampleRepository.saveAll(samples)
         log.info(
-                "Misure salvate: {} metriche da {} slot{}",
+                "Misure salvate: {} metriche da {} slot{}{}{}",
                 samples.size,
                 plan.size,
+                if (dto.fragments > 1) " (${dto.fragments} frammenti)" else "",
                 if (noNewData > 0) ", $noNewData senza dati nuovi" else "",
+                if (notResponding > 0) ", $notResponding da sensori muti" else "",
         )
     }
 
@@ -737,7 +821,7 @@ class ControlUnitServiceImpl(
                         receivedAt =
                                 dto.timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
                                         ?: OffsetDateTime.now(),
-                        fport = 48, // 0x30, report dati
+                        fport = dto.fport,
                         cfgVersion = dto.configVersion,
                         expectedCfgVersion = expected,
                         rawPayload = dto.rawPayload,
@@ -746,6 +830,46 @@ class ControlUnitServiceImpl(
                         failureReason = reason,
                     )
             )
+
+    /**
+     * Un messaggio che non si e' potuto leggere prima ancora di arrivare alle metriche:
+     * frammenti che non si ricompongono, header illeggibile, porta dismessa. Vale la stessa
+     * regola dei report scartati - il grezzo resta, il contatore lo dichiara - perche' un
+     * messaggio perso in silenzio e' esattamente cio' che il registro dei frame evita.
+     */
+    @Transactional
+    fun recordUndecodableFrame(
+            devEui: Long,
+            fport: Int,
+            rawPayload: String,
+            reason: String,
+            cfgVersion: Int? = null,
+            timestamp: String? = null,
+    ) {
+        val cu = cur.findByDevEui(devEui)
+        if (cu == null) {
+            log.warn("Control Unit non trovata per DevEUI={}: {} non registrato", devEui, reason)
+            return
+        }
+        cu.decodeFailureCount += 1
+        cur.save(cu)
+        frames.save(
+                UplinkFrame(
+                        controlUnit = cu,
+                        devEui = devEui,
+                        receivedAt =
+                                timestamp?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                                        ?: OffsetDateTime.now(),
+                        fport = fport,
+                        cfgVersion = cfgVersion,
+                        expectedCfgVersion = (cu.configVersion and 0xFF).toInt(),
+                        rawPayload = rawPayload,
+                        status = FrameStatus.DISCARDED_DECODE_ERROR,
+                        failureReason = reason,
+                )
+        )
+        log.warn("DevEUI={}: {} (scartati finora: {})", devEui, reason, cu.decodeFailureCount)
+    }
     override fun getAlarms(controlUnitId: Long): List<AlarmDTO> {
         ownedControlUnit(controlUnitId)
         return alarms.findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map { it.toDTO() }
@@ -795,17 +919,9 @@ class ControlUnitServiceImpl(
         return cu.cmdSeq
     }
 
-    /**
-     * La `Stat bitmap` della 0x23: un bit per metrica nell'ordine canonico (§ 4.6).
-     * Finche' le metriche attive arrivano da `configurationMeasure`, la mappa e' questa.
-     */
+    /** La `Stat bitmap` della 0x23. La traduzione sta in [StatBitmap], non qui. */
     private fun statBitmapOf(configurationMeasure: String?): Int =
-            when (configurationMeasure?.lowercase()) {
-                "max-min" -> 0b0000_1100 // bit 2 (max) e 3 (min)
-                "integral" -> 0b0001_0000 // bit 4
-                "puntual", "punctual" -> 0b0000_0001 // bit 0, il valore corrente
-                else -> 0b0000_0011 // media e varianza
-            }
+            StatBitmap.of(configurationMeasure)
 
     /** La CU se chi chiede puo' vederla: un utente vede solo le proprie. */
     private fun ownedControlUnit(id: Long): ControlUnit {

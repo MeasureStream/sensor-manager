@@ -19,12 +19,29 @@ object BlockPrologue {
     /** Tetto sicuro del payload LoRa a DR0/SF12 in EU868. */
     const val MAX_PAYLOAD = 51
 
-    /** Un blocco solo: 4 bit alti = 1 blocco totale, 4 bit bassi = indice 0. */
-    const val SINGLE = 0x11
+    /**
+     * Un blocco solo: un blocco totale, indice 0, cioe' **0x10**.
+     *
+     * Non e' scritta a mano ma calcolata con [block], perche' scritta a mano era sbagliata:
+     * valeva 0x11, cioe' «indice 1 di 1 blocco», che con gli indici da 0 non esiste. Il valore
+     * finiva nella sola 0x24, quindi il server mandava 0x10 per una 0x21 che stava in un
+     * pacchetto e 0x11 per ogni programmazione breve. Una CU che convalida `indice < totale`
+     * avrebbe scartato ogni 0x24 restando in attesa di un blocco mai spedito; una che non
+     * convalida avrebbe letto il corpo come se non fosse il primo blocco.
+     */
+    val SINGLE: Int = block(1, 0)
 
     /**
-     * Compone il byte BLOCK. Gli indici partono da 0, il totale da 1: con tre blocchi il
-     * primo vale 0x30, l'ultimo 0x32.
+     * Compone il byte BLOCK. **Gli indici partono da 0**, il totale da 1: con tre blocchi il
+     * primo vale 0x30, l'ultimo 0x32; con un blocco solo vale 0x10.
+     *
+     * Lo zero non e' una convenzione scelta qui: e' la stessa di tutto il resto della v1.2 —
+     * indice del sensore nel modello di MU, `OFFSET`, posizione dei bit nelle bitmap, indice
+     * del frammento in `FRAG`. Una sola numerazione significa che la CU non traduce mai.
+     *
+     * Ne discende una regola di validazione che il firmware puo' applicare in una riga: in un
+     * BLOCK valido il **nibble basso e' sempre minore di quello alto**. 0x10 e 0x32 sono
+     * validi, 0x00 e 0x11 no.
      */
     fun block(total: Int, index: Int): Int {
         require(total in 1..15) { "Numero di blocchi fuori dal nibble: $total" }

@@ -115,6 +115,15 @@ class ControlUnit {
      */
     var reportedAlarmSeq: Int? = null
 
+    /**
+     * CMD_SEQ dell'ultimo comando che la CU dichiara di aver applicato, dal poll.
+     *
+     * Confrontato con [cmdSeq], che e' l'ultimo che il server ha inviato, dice se il comando
+     * e' arrivato a destinazione. Sono lo stesso numero scritto dallo stesso autore, quindi
+     * il confronto non e' una previsione: e' una lettura.
+     */
+    var appliedCmdSeq: Int? = null
+
     /** STATUS_SEQ dell'ultimo comando 0x12 ricevuto, per lo stesso controllo di continuita'. */
     var lastStatusSeq: Int? = null
 

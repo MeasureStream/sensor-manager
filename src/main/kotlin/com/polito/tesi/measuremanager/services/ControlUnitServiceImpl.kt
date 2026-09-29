@@ -44,14 +44,6 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 
-/**
- * Di quanti comandi il server accetta di essere rimasto indietro rispetto alla CU prima di
- * rimettersi in pari da solo. Otto e' un numero scelto, non misurato: abbastanza da coprire
- * una sequenza di comandi non contati, abbastanza poco da non inseguire un CFG_VER che non
- * ha niente a che fare con questa CU.
- */
-private const val MAX_CFG_CATCH_UP = 8
-
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
@@ -391,10 +383,12 @@ class ControlUnitServiceImpl(
         // CFG_VER nel poll: dice se la configurazione inviata e' stata applicata davvero.
         // E' un'informazione diversa da quella del report - qui non si perde nessuna misura,
         // si scopre che un comando non e' arrivato a destinazione.
+        c.appliedCmdSeq?.let { cu.appliedCmdSeq = it }
+
         c.configVersion?.let { reported ->
             cu.lastReportedConfigVersion = reported
             val expected = (cu.configVersion and 0xFF).toInt()
-            if (reported != expected) realign(cu, reported, expected, c.statusRaw)
+            if (reported != expected) realign(cu, reported, expected, c.appliedCmdSeq)
         }
 
         // ALARM_SEQ nel poll: e' l'unico modo di accorgersi di un allarme che non e' mai
@@ -796,50 +790,47 @@ class ControlUnitServiceImpl(
     }
 
     /**
-     * Il CFG_VER del poll non coincide con quello che il server ha contato: si decide se
-     * rimettersi in pari o se limitarsi a dirlo.
+     * Il CFG_VER del poll non coincide con quello che il server ha contato: a decidere cosa
+     * farne e' il `CMD_SEQ` applicato, non una stima sulla distanza fra i due numeri.
      *
-     * I due contatori sono indipendenti — il server conta i comandi che manda, la CU quelli
-     * che applica — e restano in passo solo finche' ogni comando arriva ed entra in opera
-     * esattamente una volta. Quando divergono, la direzione dice cose diverse:
+     * `CFG_VER` ha due autori — la CU lo incrementa, il server lo prevede — e due contatori
+     * con due autori restano in passo solo finche' ogni comando arriva ed entra in opera una
+     * volta sola. `CMD_SEQ` ne ha uno: lo scrive il server nel prologo di blocco e la CU lo
+     * restituisce. Confrontarlo non e' una previsione, e' una lettura.
      *
-     * * **CU indietro**: il server ha inviato comandi che la CU non ha applicato. La sua
-     *   configurazione attiva e' una vecchia, e i report vanno letti con l'istantanea di
-     *   allora. Non si adotta niente, altrimenti si leggerebbero quei byte con la mappa
-     *   sbagliata.
-     * * **CU avanti di pochi**: ha applicato qualcosa che il server non ha contato. La
-     *   configurazione attiva resta l'ultima che il server ha inviato, quindi il numero si
-     *   adotta e si fotografa la mappa corrente con quel numero. Senza, ogni report
-     *   successivo verrebbe scartato per sempre: il server aspetterebbe un CFG_VER che la CU
-     *   non tornera' mai a dichiarare.
-     *
-     * Con il bit di reset alzato non si adotta nulla: dopo un riavvio il contatore riparte,
-     * ma la CU potrebbe anche aver perso la configurazione, e rimettersi in pari sul numero
-     * significherebbe dichiarare allineato cio' che non lo e'.
+     * * **La CU conferma l'ultimo comando inviato**: la configurazione in opera e' proprio
+     *   quella del server, solo numerata diversamente. Si adotta il numero della CU e si
+     *   fotografa la mappa corrente, altrimenti ogni report successivo verrebbe scartato per
+     *   sempre. Il contatore si muove solo in avanti: tornare indietro farebbe collidere due
+     *   istantanee sullo stesso CFG_VER.
+     * * **La CU conferma un comando diverso**: un downlink non e' arrivato. La sua
+     *   configurazione attiva e' una vecchia, e i suoi report vanno letti con l'istantanea di
+     *   allora: non si adotta niente, e il log dice quale comando manca.
      */
-    private fun realign(cu: ControlUnit, reported: Int, expected: Int, statusRaw: Int) {
-        val ahead = (reported - expected) and 0xFF
-        val afterReset = protocolService.statusFlags(statusRaw).any { it.meaning == "reset" }
-
-        if (ahead in 1..MAX_CFG_CATCH_UP && !afterReset) {
-            cu.configVersion += ahead
+    private fun realign(cu: ControlUnit, reported: Int, expected: Int, appliedCmdSeq: Int?) {
+        // cmdSeq a 0 significa che il server non ha mai configurato questa CU: non c'e'
+        // nessun comando su cui essere d'accordo.
+        if (appliedCmdSeq != null && appliedCmdSeq == cu.cmdSeq && cu.cmdSeq != 0) {
+            cu.configVersion += (reported - expected) and 0xFF
             cur.save(cu)
             snapshots.take(cu)
             log.warn(
-                    "CU devEUI={}: il poll dichiara CFG_VER {}, il server ne aveva contati {}: il server si allinea e fotografa la configurazione corrente",
+                    "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
                     cu.devEui,
                     reported,
                     expected,
+                    appliedCmdSeq,
             )
             return
         }
 
         log.warn(
-                "CU devEUI={}: il poll dichiara CFG_VER {}, il server attende {}{}: configurazione non applicata",
+                "CU devEUI={}: il poll dichiara CFG_VER {}, il server attende {}; ultimo comando applicato {} contro {} inviato: la configurazione non e' arrivata a destinazione",
                 cu.devEui,
                 reported,
                 expected,
-                if (afterReset) " dopo un reset" else "",
+                appliedCmdSeq ?: "non dichiarato",
+                cu.cmdSeq,
         )
     }
 

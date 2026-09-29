@@ -9,6 +9,17 @@ data class PollMessage(
         val model: Int,
         /** CFG_VER dichiarato dalla CU. Assente nel formato 0x0A, che non lo portava. */
         val cfgVersion: Int? = null,
+        /**
+         * CMD_SEQ dell'ultimo comando di configurazione **applicato**.
+         *
+         * E' il numero che ha scritto il server, nel prologo di blocco, e che la CU si limita
+         * a restituire: ha un autore solo, quindi non puo' desincronizzarsi. Il CFG_VER
+         * invece lo incrementa la CU e il server deve prevederlo — due contatori con due
+         * autori restano in passo solo finche' ogni comando arriva e viene applicato una
+         * volta sola. Questo byte dice **quale** comando e' in opera, e toglie al server il
+         * bisogno di indovinarlo.
+         */
+        val appliedCmdSeq: Int? = null,
         /** ProtoVer: 0x12 per il protocollo v1.2. Assente nei formati precedenti. */
         val protocolVer: Int? = null,
         /** TEMPLATE_VER del vecchio poll a 7 byte, sostituito da ProtoVer nella v1.2. */
@@ -28,11 +39,19 @@ data class PollMessage(
 class PollPayloadError(message: String) : Exception(message)
 
 /**
- * Il poll, nei tre formati che possono arrivare.
+ * Il poll, nei formati che possono arrivare.
  *
- * La porta 0x0B e' condivisa fra il poll della v1.2 e quello che lo precedeva: si distinguono
- * dalla lunghezza, che e' l'unico criterio possibile e quello che la documentazione indica.
- * La 0x0A resta finche' esiste una CU che non e' stata aggiornata.
+ * La porta 0x0B e' condivisa da tutte le revisioni del poll: si distinguono dalla lunghezza,
+ * che e' il criterio che la documentazione indica. La v1.2 ne ha due, perche' `CMD_SEQ` e'
+ * entrato dopo: dieci byte con, nove senza. La 0x0A resta finche' esiste una CU non
+ * aggiornata.
+ *
+ * Un caso resta ambiguo e vale la pena dirlo: un poll della revisione senza `CMD_SEQ` che
+ * porti **anche** un byte di estensione dello Status arriva a dieci byte, e viene letto come
+ * se il `CMD_SEQ` ci fosse. Sniffare il valore di ProtoVer non aiuterebbe — nel formato nuovo
+ * quel byte e' il `CMD_SEQ`, che 0x12 puo' valerlo benissimo. Si accetta perche' la revisione
+ * a nove byte e' vissuta pochi giorni, fra il server e il simulatore, e sparisce con
+ * l'aggiornamento del firmware.
  */
 @Component
 class PollDecoder(
@@ -44,7 +63,8 @@ class PollDecoder(
 
         return when {
             fport == FPort.CU_STATUS_LEGACY -> decodeLegacyStatus(buffer, bytes.size)
-            bytes.size >= 9 -> decodeV12(buffer)
+            bytes.size >= 10 -> decodeV12(buffer, withCmdSeq = true)
+            bytes.size == 9 -> decodeV12(buffer, withCmdSeq = false)
             bytes.size >= 7 -> decodeLegacyPoll(buffer)
             else ->
                     throw PollPayloadError(
@@ -53,10 +73,14 @@ class PollDecoder(
         }
     }
 
-    /** Poll v1.2: CU Model, CFG_VER, ProtoVer, Battery, P_TX, Status (2 byte), ALARM_SEQ. */
-    private fun decodeV12(buffer: ByteBuffer): PollMessage {
+    /**
+     * Poll v1.2: CU Model, CFG_VER, CMD_SEQ, ProtoVer, Battery, P_TX, Status (2 byte),
+     * ALARM_SEQ. Senza [withCmdSeq] e' la revisione precedente, a nove byte.
+     */
+    private fun decodeV12(buffer: ByteBuffer, withCmdSeq: Boolean): PollMessage {
         val model = buffer.short.toInt() and 0xFFFF
         val cfgVersion = buffer.get().toInt() and 0xFF
+        val appliedCmdSeq = if (withCmdSeq) buffer.get().toInt() and 0xFF else null
         val protocolVer = buffer.get().toInt() and 0xFF
         val batteryRaw = buffer.get().toInt() and 0xFF
         val ptx = buffer.get().toInt() and 0xFF
@@ -69,6 +93,7 @@ class PollDecoder(
                 .copy(
                         model = model,
                         cfgVersion = cfgVersion,
+                        appliedCmdSeq = appliedCmdSeq,
                         protocolVer = protocolVer,
                         transmissionPower = ptx,
                         statusWord = status,

@@ -58,18 +58,6 @@ class UplinkDecodersTest {
     }
 
     @Test
-    fun `poll v1_2 - la revisione a nove byte, senza CMD_SEQ`() {
-        // Lo stesso poll prima che CMD_SEQ entrasse: il byte 3 e' gia' ProtoVer.
-        val message = poll.decode(bytes("00 64 07 12 58 0E 00 21 05"), FPort.POLL)
-
-        assertEquals(7, message.cfgVersion)
-        assertNull(message.appliedCmdSeq, "questa revisione non lo dichiara")
-        assertEquals(0x12, message.protocolVer)
-        assertEquals(88, message.batteryLevel)
-        assertEquals(5, message.alarmSeq)
-    }
-
-    @Test
     fun `poll v1_2 - lo Status porta la sua catena di estensione`() {
         // Status 0x8003: bit 15 alzato, quindi segue un byte esteso. 0x02 porta un solo bit
         // nuovo (il primo della catena, cioe' il 15) e chiude la catena.

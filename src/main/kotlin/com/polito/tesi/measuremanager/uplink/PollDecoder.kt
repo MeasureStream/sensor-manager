@@ -41,17 +41,13 @@ class PollPayloadError(message: String) : Exception(message)
 /**
  * Il poll, nei formati che possono arrivare.
  *
- * La porta 0x0B e' condivisa da tutte le revisioni del poll: si distinguono dalla lunghezza,
- * che e' il criterio che la documentazione indica. La v1.2 ne ha due, perche' `CMD_SEQ` e'
- * entrato dopo: dieci byte con, nove senza. La 0x0A resta finche' esiste una CU non
- * aggiornata.
+ * La porta 0x0B e' condivisa dal poll della v1.2 e da quello che lo precedeva: si distinguono
+ * dalla lunghezza, che e' il criterio che la documentazione indica. La 0x0A resta finche'
+ * esiste una CU non aggiornata.
  *
- * Un caso resta ambiguo e vale la pena dirlo: un poll della revisione senza `CMD_SEQ` che
- * porti **anche** un byte di estensione dello Status arriva a dieci byte, e viene letto come
- * se il `CMD_SEQ` ci fosse. Sniffare il valore di ProtoVer non aiuterebbe — nel formato nuovo
- * quel byte e' il `CMD_SEQ`, che 0x12 puo' valerlo benissimo. Si accetta perche' la revisione
- * a nove byte e' vissuta pochi giorni, fra il server e il simulatore, e sparisce con
- * l'aggiornamento del firmware.
+ * La revisione intermedia a nove byte — v1.2 prima che `CMD_SEQ` entrasse — non e' piu'
+ * accettata: e' vissuta pochi giorni fra il server e il simulatore, e tenerla in vita
+ * costringeva a convivere con un'ambiguita' di lunghezza che non si poteva sciogliere.
  */
 @Component
 class PollDecoder(
@@ -63,8 +59,7 @@ class PollDecoder(
 
         return when {
             fport == FPort.CU_STATUS_LEGACY -> decodeLegacyStatus(buffer, bytes.size)
-            bytes.size >= 10 -> decodeV12(buffer, withCmdSeq = true)
-            bytes.size == 9 -> decodeV12(buffer, withCmdSeq = false)
+            bytes.size >= 10 -> decodeV12(buffer)
             bytes.size >= 7 -> decodeLegacyPoll(buffer)
             else ->
                     throw PollPayloadError(
@@ -75,12 +70,12 @@ class PollDecoder(
 
     /**
      * Poll v1.2: CU Model, CFG_VER, CMD_SEQ, ProtoVer, Battery, P_TX, Status (2 byte),
-     * ALARM_SEQ. Senza [withCmdSeq] e' la revisione precedente, a nove byte.
+     * ALARM_SEQ.
      */
-    private fun decodeV12(buffer: ByteBuffer, withCmdSeq: Boolean): PollMessage {
+    private fun decodeV12(buffer: ByteBuffer): PollMessage {
         val model = buffer.short.toInt() and 0xFFFF
         val cfgVersion = buffer.get().toInt() and 0xFF
-        val appliedCmdSeq = if (withCmdSeq) buffer.get().toInt() and 0xFF else null
+        val appliedCmdSeq = buffer.get().toInt() and 0xFF
         val protocolVer = buffer.get().toInt() and 0xFF
         val batteryRaw = buffer.get().toInt() and 0xFF
         val ptx = buffer.get().toInt() and 0xFF

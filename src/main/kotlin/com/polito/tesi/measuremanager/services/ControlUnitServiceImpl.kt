@@ -44,6 +44,14 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 
+/**
+ * Di quanti comandi il server accetta di essere rimasto indietro rispetto alla CU prima di
+ * rimettersi in pari da solo. Otto e' un numero scelto, non misurato: abbastanza da coprire
+ * una sequenza di comandi non contati, abbastanza poco da non inseguire un CFG_VER che non
+ * ha niente a che fare con questa CU.
+ */
+private const val MAX_CFG_CATCH_UP = 8
+
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
@@ -279,12 +287,24 @@ class ControlUnitServiceImpl(
                                 "Control Unit con DevEui ${command.devEui} non trovata"
                         )
         cu.transmissionInterval = command.transmissionIndex
+        cur.save(cu)
 
-        // La 0x24 non tocca i periodi dei sensori, quindi non cambia la mappa degli slot e
-        // non serve una nuova istantanea: cambia solo la cadenza con cui la CU trasmette.
+        // La 0x24 non tocca i periodi dei sensori, quindi la mappa degli slot non cambia — ma
+        // il CFG_VER si incrementa lo stesso, perche' quel contatore conta **i comandi che la
+        // CU ha applicato**, non le versioni dello schema di decodifica. E' la doppia natura
+        // che la documentazione elenca fra le questioni aperte.
+        //
+        // Finche' il server non lo seguiva, bastava una programmazione breve per farlo restare
+        // indietro: il primo report successivo dichiarava un CFG_VER che il server non
+        // conosceva, e veniva scartato per disallineamento. L'istantanea si prende comunque,
+        // anche se il contenuto e' identico alla precedente, perche' e' indicizzata per
+        // CFG_VER: senza, quel numero non avrebbe nessuna mappa a cui corrispondere.
+        cu.configVersion++
+        cur.save(cu)
+        snapshots.take(cu)
+
         encoder.encodeTransmissionConfig(command, nextCmdSeq(cu))
                 .forEach { kcu.sendDownlink(cu.deviceId, it) }
-        cur.save(cu)
         return cu.toCUTransmissionCommandDTO()
     }
 
@@ -374,14 +394,7 @@ class ControlUnitServiceImpl(
         c.configVersion?.let { reported ->
             cu.lastReportedConfigVersion = reported
             val expected = (cu.configVersion and 0xFF).toInt()
-            if (reported != expected) {
-                log.warn(
-                        "CU devEUI={}: il poll dichiara CFG_VER {}, il server ha inviato {}: configurazione non applicata",
-                        c.devEui,
-                        reported,
-                        expected,
-                )
-            }
+            if (reported != expected) realign(cu, reported, expected, c.statusRaw)
         }
 
         // ALARM_SEQ nel poll: e' l'unico modo di accorgersi di un allarme che non e' mai
@@ -779,6 +792,54 @@ class ControlUnitServiceImpl(
                 if (dto.fragments > 1) " (${dto.fragments} frammenti)" else "",
                 if (noNewData > 0) ", $noNewData senza dati nuovi" else "",
                 if (notResponding > 0) ", $notResponding da sensori muti" else "",
+        )
+    }
+
+    /**
+     * Il CFG_VER del poll non coincide con quello che il server ha contato: si decide se
+     * rimettersi in pari o se limitarsi a dirlo.
+     *
+     * I due contatori sono indipendenti — il server conta i comandi che manda, la CU quelli
+     * che applica — e restano in passo solo finche' ogni comando arriva ed entra in opera
+     * esattamente una volta. Quando divergono, la direzione dice cose diverse:
+     *
+     * * **CU indietro**: il server ha inviato comandi che la CU non ha applicato. La sua
+     *   configurazione attiva e' una vecchia, e i report vanno letti con l'istantanea di
+     *   allora. Non si adotta niente, altrimenti si leggerebbero quei byte con la mappa
+     *   sbagliata.
+     * * **CU avanti di pochi**: ha applicato qualcosa che il server non ha contato. La
+     *   configurazione attiva resta l'ultima che il server ha inviato, quindi il numero si
+     *   adotta e si fotografa la mappa corrente con quel numero. Senza, ogni report
+     *   successivo verrebbe scartato per sempre: il server aspetterebbe un CFG_VER che la CU
+     *   non tornera' mai a dichiarare.
+     *
+     * Con il bit di reset alzato non si adotta nulla: dopo un riavvio il contatore riparte,
+     * ma la CU potrebbe anche aver perso la configurazione, e rimettersi in pari sul numero
+     * significherebbe dichiarare allineato cio' che non lo e'.
+     */
+    private fun realign(cu: ControlUnit, reported: Int, expected: Int, statusRaw: Int) {
+        val ahead = (reported - expected) and 0xFF
+        val afterReset = protocolService.statusFlags(statusRaw).any { it.meaning == "reset" }
+
+        if (ahead in 1..MAX_CFG_CATCH_UP && !afterReset) {
+            cu.configVersion += ahead
+            cur.save(cu)
+            snapshots.take(cu)
+            log.warn(
+                    "CU devEUI={}: il poll dichiara CFG_VER {}, il server ne aveva contati {}: il server si allinea e fotografa la configurazione corrente",
+                    cu.devEui,
+                    reported,
+                    expected,
+            )
+            return
+        }
+
+        log.warn(
+                "CU devEUI={}: il poll dichiara CFG_VER {}, il server attende {}{}: configurazione non applicata",
+                cu.devEui,
+                reported,
+                expected,
+                if (afterReset) " dopo un reset" else "",
         )
     }
 

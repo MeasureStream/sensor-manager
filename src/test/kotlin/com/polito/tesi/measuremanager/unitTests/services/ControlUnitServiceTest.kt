@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.unitTests.services
 
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
+import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.MuDescriptor
 import com.polito.tesi.measuremanager.entities.ControlUnit
@@ -25,6 +26,7 @@ import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ReportDecoder
+import com.polito.tesi.measuremanager.template.StatusBit
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
@@ -291,6 +293,94 @@ class ControlUnitServiceTest {
         assertEquals(0, savedMu.sensors[0].sensorIndex)
     }
 
+    /* --------------------------------------------------------------- CFG_VER */
+
+    /**
+     * La CU incrementa il CFG_VER per ogni comando con prologo che applica, 0x24 compresa.
+     * Se il server non lo segue resta indietro di uno, e il primo report successivo dichiara
+     * una versione che il server non conosce: scartato, e per sempre.
+     */
+    @Test
+    fun `la programmazione breve incrementa il CFG_VER e fotografa la configurazione`() {
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 4
+            transmissionInterval = 0
+        }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { encoder.encodeTransmissionConfig(any(), any()) } returns emptyList()
+
+        service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
+
+        assertEquals(5, cu.configVersion, "il comando e' stato applicato: il contatore sale")
+        verify(exactly = 1) { configSnapshots.take(cu) }
+    }
+
+    @Test
+    fun `se la CU e' avanti di pochi comandi il server si rimette in pari`() {
+        // Il caso reale: due 0x24 applicate dalla CU e non contate dal server.
+        val cu = ControlUnit().apply { devEui = 111L; deviceId = "lora-e5"; configVersion = 0 }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 2))
+
+        assertEquals(2, cu.configVersion, "il server adotta il numero dichiarato dalla CU")
+        assertEquals(2, cu.lastReportedConfigVersion)
+        verify(exactly = 1) { configSnapshots.take(cu) }
+    }
+
+    @Test
+    fun `se la CU e' indietro il server non tocca niente`() {
+        // Un comando non applicato: la configurazione attiva sulla CU e' una vecchia, e i suoi
+        // report vanno letti con l'istantanea di allora, non con la mappa corrente.
+        val cu = ControlUnit().apply { devEui = 111L; deviceId = "lora-e5"; configVersion = 7 }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 5))
+
+        assertEquals(7, cu.configVersion, "il server resta sulla configurazione che ha inviato")
+        verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    @Test
+    fun `dopo un reset il numero non si adotta`() {
+        // Il contatore riparte, ma la CU potrebbe aver perso anche la configurazione:
+        // allinearsi sul numero direbbe allineato cio' che non lo e'.
+        val cu = ControlUnit().apply { devEui = 111L; deviceId = "lora-e5"; configVersion = 254 }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(any()) } returns
+                listOf(StatusBit(bit = 8, kind = "event", meaning = "reset", description = "CU resettata"))
+
+        service.onStatusUpdate(poll(configVersion = 0, statusRaw = 1 shl 8))
+
+        assertEquals(254, cu.configVersion)
+        verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    private fun poll(configVersion: Int, statusRaw: Int = 0) =
+            CuStatusUpdate(
+                    devEui = 111L,
+                    deviceId = "lora-e5",
+                    model = 1,
+                    batteryLevel = 100,
+                    ptx = 14,
+                    acPowered = true,
+                    isCharging = false,
+                    statusRaw = statusRaw,
+                    configVersion = configVersion,
+                    protocolVer = 0x12,
+                    alarmSeq = 0,
+            )
 }
 
 

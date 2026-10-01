@@ -36,6 +36,11 @@ data class CuStatusUpdate(
         val statusRaw: Int,
         /** CFG_VER dichiarato dalla CU: se non e' quello atteso, la configurazione non e' stata applicata. */
         val configVersion: Int? = null,
+        /**
+         * CMD_SEQ dell'ultimo comando applicato, restituito dalla CU. E' il numero che ha
+         * scritto il server: dice **quale** comando e' in opera, invece di lasciarlo dedurre.
+         */
+        val appliedCmdSeq: Int? = null,
         /** ProtoVer: 0x12 per il protocollo v1.2. */
         val protocolVer: Int? = null,
         /** ALARM_SEQ corrente: dice se un messaggio di allarme non e' mai arrivato. */

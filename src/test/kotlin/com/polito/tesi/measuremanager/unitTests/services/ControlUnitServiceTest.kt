@@ -1,6 +1,7 @@
 package com.polito.tesi.measuremanager.unitTests.services
 
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
+import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.MuDescriptor
 import com.polito.tesi.measuremanager.entities.ControlUnit
@@ -291,6 +292,132 @@ class ControlUnitServiceTest {
         assertEquals(0, savedMu.sensors[0].sensorIndex)
     }
 
+    /* --------------------------------------------------------------- CFG_VER */
+
+    /**
+     * La CU incrementa il CFG_VER per ogni comando con prologo che applica, 0x24 compresa.
+     * Se il server non lo segue resta indietro di uno, e il primo report successivo dichiara
+     * una versione che il server non conosce: scartato, e per sempre.
+     */
+    @Test
+    fun `la programmazione breve incrementa il CFG_VER e fotografa la configurazione`() {
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 4
+            transmissionInterval = 0
+        }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { encoder.encodeTransmissionConfig(any(), any()) } returns emptyList()
+
+        service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
+
+        assertEquals(5, cu.configVersion, "il comando e' stato applicato: il contatore sale")
+        verify(exactly = 1) { configSnapshots.take(cu) }
+    }
+
+    @Test
+    fun `se la CU conferma l'ultimo comando inviato il server si allinea`() {
+        // Il caso reale: due 0x24 applicate dalla CU e non contate dal server. Il CMD_SEQ
+        // restituito e' quello che il server ha mandato, quindi la configurazione in opera e'
+        // la sua: cambia solo il numero con cui chiamarla.
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 0
+            cmdSeq = 3
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 2, appliedCmdSeq = 3))
+
+        assertEquals(2, cu.configVersion, "il server adotta il numero dichiarato dalla CU")
+        assertEquals(2, cu.lastReportedConfigVersion)
+        assertEquals(3, cu.appliedCmdSeq)
+        verify(exactly = 1) { configSnapshots.take(cu) }
+    }
+
+    @Test
+    fun `se la CU conferma un comando diverso il server non tocca niente`() {
+        // Un downlink non e' arrivato: la configurazione attiva sulla CU e' una vecchia, e i
+        // suoi report vanno letti con l'istantanea di allora, non con la mappa corrente.
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 7
+            cmdSeq = 4
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 5, appliedCmdSeq = 3))
+
+        assertEquals(7, cu.configVersion, "il server resta sulla configurazione che ha inviato")
+        assertEquals(3, cu.appliedCmdSeq, "ma registra quale comando la CU ha davvero applicato")
+        verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    @Test
+    fun `senza CMD_SEQ nel poll non si adotta nessun numero`() {
+        // Firmware precedente: il poll a nove byte non lo dichiara, e senza quel byte il
+        // server puo' solo constatare il disallineamento.
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 0
+            cmdSeq = 3
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 2, appliedCmdSeq = null))
+
+        assertEquals(0, cu.configVersion)
+        verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    @Test
+    fun `su una CU mai configurata non c'e' nessun comando su cui essere d'accordo`() {
+        // cmdSeq a 0: il server non ha mai mandato niente, quindi un CMD_SEQ applicato a 0
+        // non conferma proprio nulla.
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 0
+            cmdSeq = 0
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 4, appliedCmdSeq = 0))
+
+        assertEquals(0, cu.configVersion)
+        verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    private fun poll(configVersion: Int, appliedCmdSeq: Int? = null, statusRaw: Int = 0) =
+            CuStatusUpdate(
+                    devEui = 111L,
+                    deviceId = "lora-e5",
+                    model = 1,
+                    batteryLevel = 100,
+                    ptx = 14,
+                    acPowered = true,
+                    isCharging = false,
+                    statusRaw = statusRaw,
+                    configVersion = configVersion,
+                    appliedCmdSeq = appliedCmdSeq,
+                    protocolVer = 0x12,
+                    alarmSeq = 0,
+            )
 }
 
 

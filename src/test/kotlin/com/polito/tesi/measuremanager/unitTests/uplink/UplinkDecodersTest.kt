@@ -40,14 +40,15 @@ class UplinkDecodersTest {
     /* ------------------------------------------------------------- poll */
 
     @Test
-    fun `poll v1_2 - nove byte`() {
-        // 0064 | 07 | 12 | 58 | 0E | 0021 | 05
-        // CU Model 0x0064, CFG_VER 7, ProtoVer 0x12, batteria 88%, P_TX 14,
-        // Status con i bit 0 e 5, ALARM_SEQ 5.
-        val message = poll.decode(bytes("00 64 07 12 58 0E 00 21 05"), FPort.POLL)
+    fun `poll v1_2 - dieci byte, con il CMD_SEQ applicato`() {
+        // 0064 | 07 | 09 | 12 | 58 | 0E | 0021 | 05
+        // CU Model 0x0064, CFG_VER 7, CMD_SEQ applicato 9, ProtoVer 0x12, batteria 88%,
+        // P_TX 14, Status con i bit 0 e 5, ALARM_SEQ 5.
+        val message = poll.decode(bytes("00 64 07 09 12 58 0E 00 21 05"), FPort.POLL)
 
         assertEquals(0x0064, message.model)
         assertEquals(7, message.cfgVersion)
+        assertEquals(9, message.appliedCmdSeq, "il quarto byte dice quale comando e' in opera")
         assertEquals(0x12, message.protocolVer, "ProtoVer 0x12: la CU parla il protocollo v1.2")
         assertEquals(88, message.batteryLevel)
         assertEquals(14, message.transmissionPower)
@@ -60,10 +61,11 @@ class UplinkDecodersTest {
     fun `poll v1_2 - lo Status porta la sua catena di estensione`() {
         // Status 0x8003: bit 15 alzato, quindi segue un byte esteso. 0x02 porta un solo bit
         // nuovo (il primo della catena, cioe' il 15) e chiude la catena.
-        val message = poll.decode(bytes("00 64 07 12 58 0E 80 03 02 05"), FPort.POLL)
+        val message = poll.decode(bytes("00 64 07 09 12 58 0E 80 03 02 05"), FPort.POLL)
 
         // I bit 0 e 1 dal campo base, il bit 16 dall'estensione (0x02 = bit 1 della catena).
         assertEquals(0b11L or (0b10L shl 15), message.statusWord)
+        assertEquals(9, message.appliedCmdSeq)
         assertEquals(5, message.alarmSeq, "l'ALARM_SEQ resta in fondo, dopo la catena")
     }
 
@@ -90,11 +92,11 @@ class UplinkDecodersTest {
 
     @Test
     fun `la batteria a 254 e 255 non e' una percentuale`() {
-        val rete = poll.decode(bytes("00 64 07 12 FE 0E 00 00 00"), FPort.POLL)
+        val rete = poll.decode(bytes("00 64 07 09 12 FE 0E 00 00 00"), FPort.POLL)
         assertTrue(rete.acPowered)
         assertEquals(100, rete.batteryLevel, "alimentata da rete: la carica non e' un dato")
 
-        val carica = poll.decode(bytes("00 64 07 12 FF 0E 00 00 00"), FPort.POLL)
+        val carica = poll.decode(bytes("00 64 07 09 12 FF 0E 00 00 00"), FPort.POLL)
         assertTrue(carica.charging)
     }
 

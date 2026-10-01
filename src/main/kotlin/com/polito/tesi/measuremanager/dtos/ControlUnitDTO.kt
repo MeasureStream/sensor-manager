@@ -96,6 +96,13 @@ data class ControlUnitDTO(
     val protocolVer: Int?,
     /** I bit di stato alzati nell'ultimo poll, gia' tradotti dal dizionario di protocollo. */
     val statusFlags: List<StatusFlagDTO>,
+    /** Ultimo comando di configurazione inviato dal server. */
+    val cmdSeq: Int,
+    /**
+     * Ultimo comando che la CU dichiara di aver applicato. Diverso da [cmdSeq] significa che
+     * un comando non e' arrivato a destinazione: null se il firmware non lo dichiara ancora.
+     */
+    val appliedCmdSeq: Int?,
     val statusAt: java.time.OffsetDateTime?,
 
     // Lista delle MU collegate (solo gli ID o gli ExtendedID per leggerezza)
@@ -147,6 +154,8 @@ fun ControlUnit.toDTO(
     lastConfigMismatchAt = lastConfigMismatchAt,
     protocolVer = protocolVer,
     statusFlags = protocol?.statusFlags(statusWord)?.map { it.toDTO() } ?: emptyList(),
+    cmdSeq = cmdSeq,
+    appliedCmdSeq = appliedCmdSeq,
     statusAt = statusAt,
 
     lastFCnt = lastFCnt,

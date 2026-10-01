@@ -108,6 +108,7 @@ class UplinkRouter(
                         isCharging = poll.charging,
                         statusRaw = poll.statusWord.toInt(),
                         configVersion = poll.cfgVersion,
+                        appliedCmdSeq = poll.appliedCmdSeq,
                         protocolVer = poll.protocolVer,
                         alarmSeq = poll.alarmSeq,
                 )

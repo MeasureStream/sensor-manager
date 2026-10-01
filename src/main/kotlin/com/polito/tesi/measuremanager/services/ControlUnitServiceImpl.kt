@@ -279,12 +279,24 @@ class ControlUnitServiceImpl(
                                 "Control Unit con DevEui ${command.devEui} non trovata"
                         )
         cu.transmissionInterval = command.transmissionIndex
+        cur.save(cu)
 
-        // La 0x24 non tocca i periodi dei sensori, quindi non cambia la mappa degli slot e
-        // non serve una nuova istantanea: cambia solo la cadenza con cui la CU trasmette.
+        // La 0x24 non tocca i periodi dei sensori, quindi la mappa degli slot non cambia — ma
+        // il CFG_VER si incrementa lo stesso, perche' quel contatore conta **i comandi che la
+        // CU ha applicato**, non le versioni dello schema di decodifica. E' la doppia natura
+        // che la documentazione elenca fra le questioni aperte.
+        //
+        // Finche' il server non lo seguiva, bastava una programmazione breve per farlo restare
+        // indietro: il primo report successivo dichiarava un CFG_VER che il server non
+        // conosceva, e veniva scartato per disallineamento. L'istantanea si prende comunque,
+        // anche se il contenuto e' identico alla precedente, perche' e' indicizzata per
+        // CFG_VER: senza, quel numero non avrebbe nessuna mappa a cui corrispondere.
+        cu.configVersion++
+        cur.save(cu)
+        snapshots.take(cu)
+
         encoder.encodeTransmissionConfig(command, nextCmdSeq(cu))
                 .forEach { kcu.sendDownlink(cu.deviceId, it) }
-        cur.save(cu)
         return cu.toCUTransmissionCommandDTO()
     }
 
@@ -371,17 +383,12 @@ class ControlUnitServiceImpl(
         // CFG_VER nel poll: dice se la configurazione inviata e' stata applicata davvero.
         // E' un'informazione diversa da quella del report - qui non si perde nessuna misura,
         // si scopre che un comando non e' arrivato a destinazione.
+        c.appliedCmdSeq?.let { cu.appliedCmdSeq = it }
+
         c.configVersion?.let { reported ->
             cu.lastReportedConfigVersion = reported
             val expected = (cu.configVersion and 0xFF).toInt()
-            if (reported != expected) {
-                log.warn(
-                        "CU devEUI={}: il poll dichiara CFG_VER {}, il server ha inviato {}: configurazione non applicata",
-                        c.devEui,
-                        reported,
-                        expected,
-                )
-            }
+            if (reported != expected) realign(cu, reported, expected, c.appliedCmdSeq)
         }
 
         // ALARM_SEQ nel poll: e' l'unico modo di accorgersi di un allarme che non e' mai
@@ -779,6 +786,51 @@ class ControlUnitServiceImpl(
                 if (dto.fragments > 1) " (${dto.fragments} frammenti)" else "",
                 if (noNewData > 0) ", $noNewData senza dati nuovi" else "",
                 if (notResponding > 0) ", $notResponding da sensori muti" else "",
+        )
+    }
+
+    /**
+     * Il CFG_VER del poll non coincide con quello che il server ha contato: a decidere cosa
+     * farne e' il `CMD_SEQ` applicato, non una stima sulla distanza fra i due numeri.
+     *
+     * `CFG_VER` ha due autori — la CU lo incrementa, il server lo prevede — e due contatori
+     * con due autori restano in passo solo finche' ogni comando arriva ed entra in opera una
+     * volta sola. `CMD_SEQ` ne ha uno: lo scrive il server nel prologo di blocco e la CU lo
+     * restituisce. Confrontarlo non e' una previsione, e' una lettura.
+     *
+     * * **La CU conferma l'ultimo comando inviato**: la configurazione in opera e' proprio
+     *   quella del server, solo numerata diversamente. Si adotta il numero della CU e si
+     *   fotografa la mappa corrente, altrimenti ogni report successivo verrebbe scartato per
+     *   sempre. Il contatore si muove solo in avanti: tornare indietro farebbe collidere due
+     *   istantanee sullo stesso CFG_VER.
+     * * **La CU conferma un comando diverso**: un downlink non e' arrivato. La sua
+     *   configurazione attiva e' una vecchia, e i suoi report vanno letti con l'istantanea di
+     *   allora: non si adotta niente, e il log dice quale comando manca.
+     */
+    private fun realign(cu: ControlUnit, reported: Int, expected: Int, appliedCmdSeq: Int?) {
+        // cmdSeq a 0 significa che il server non ha mai configurato questa CU: non c'e'
+        // nessun comando su cui essere d'accordo.
+        if (appliedCmdSeq != null && appliedCmdSeq == cu.cmdSeq && cu.cmdSeq != 0) {
+            cu.configVersion += (reported - expected) and 0xFF
+            cur.save(cu)
+            snapshots.take(cu)
+            log.warn(
+                    "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
+                    cu.devEui,
+                    reported,
+                    expected,
+                    appliedCmdSeq,
+            )
+            return
+        }
+
+        log.warn(
+                "CU devEUI={}: il poll dichiara CFG_VER {}, il server attende {}; ultimo comando applicato {} contro {} inviato: la configurazione non e' arrivata a destinazione",
+                cu.devEui,
+                reported,
+                expected,
+                appliedCmdSeq ?: "non dichiarato",
+                cu.cmdSeq,
         )
     }
 

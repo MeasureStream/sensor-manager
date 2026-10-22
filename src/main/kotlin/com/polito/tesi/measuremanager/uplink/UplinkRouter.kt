@@ -91,6 +91,11 @@ class UplinkRouter(
                     e,
             )
         }
+
+        // L'ultimo contatto si segna qui, su qualunque porta e anche se la lettura e'
+        // fallita: e' arrivato qualcosa da quella CU, ed e' tutto cio' che significa. Dopo
+        // l'instradamento, cosi' una CU appena censita dal poll esiste gia'.
+        cus.touch(uplink.devEui, uplink.timestamp)
     }
 
     /* ------------------------------------------------------------- poll */

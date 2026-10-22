@@ -127,6 +127,20 @@ class UplinkDecodersTest {
     }
 
     @Test
+    fun `nessuna MU connessa - un byte solo`() {
+        // E' la risposta che arriva quando l'ultima MU viene staccata: scartarla
+        // significherebbe non accorgersi mai di un distacco.
+        val entries = topology.decode(bytes("00"), FPort.TOPOLOGY)
+
+        assertEquals(emptyList(), entries)
+    }
+
+    @Test
+    fun `un byte solo diverso da zero non e' una topologia vuota`() {
+        assertThrows<TopologyPayloadError> { topology.decode(bytes("07"), FPort.TOPOLOGY) }
+    }
+
+    @Test
     fun `una notifica di lunghezza sbagliata e' un errore, non un troncamento`() {
         // Nove byte su record da cinque: l'ultima MU sarebbe letta a meta'.
         assertThrows<TopologyPayloadError> {

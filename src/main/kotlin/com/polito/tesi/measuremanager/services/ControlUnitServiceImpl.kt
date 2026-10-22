@@ -44,6 +44,12 @@ import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 
+/**
+ * Bit 0 di `Command1`: chiede alla CU il controllo di sanita' delle MU, cioe' una notifica di
+ * topologia 0x11 incondizionata. E' un'azione one-shot, non uno stato: si consuma all'arrivo.
+ */
+private const val COMMAND1_MU_CHECK = 0x01
+
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
@@ -184,10 +190,53 @@ class ControlUnitServiceImpl(
         cu.pollingInterval = command.pollingInterval
         cur.save(cu)
 
-        kcu.sendPollingUpdate(command.deviceId, command)
+        sendCuConfig(cu)
 
-        println("Comando di polling inviato a ${command.deviceId}: ${command.pollingInterval}s")
+        log.info(
+                "Configurazione CU inviata a {}: poll ogni {} h",
+                cu.deviceId,
+                command.pollingInterval,
+        )
         return command
+    }
+
+    /**
+     * Chiede alla CU il controllo di sanita' delle MU: bit 0 di `Command1`.
+     *
+     * La CU risponde **sempre** con una notifica di topologia 0x11, anche se non e' cambiato
+     * nulla e anche con zero MU. E' l'unico modo che il server ha di riallineare la topologia
+     * quando una MU viene staccata e il dispositivo non se n'e' accorto da solo: senza questa
+     * richiesta la MU resta censita finche' qualcuno non preme il pulsante di configurazione.
+     */
+    @Transactional
+    override fun requestMuCheck(controlUnitId: Long): ControlUnitDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        sendCuConfig(cu, command1 = COMMAND1_MU_CHECK)
+        log.info("CU {}: chiesto il controllo di sanita' delle MU", cu.deviceId)
+        return cu.toDTO(templateService, protocolService)
+    }
+
+    /**
+     * Configurazione CU 0x0A: quattro byte di **valori assoluti**.
+     *
+     * Non porta prologo e non incrementa il CFG_VER, ma proprio perche' i valori sono
+     * assoluti va composta con quelli correnti: mandare uno zero dove la CU aveva un valore
+     * significa cancellarlo. Vale soprattutto per il periodo di poll, dove **0 e' lo
+     * spegnimento definitivo e irreversibile**: se il server non lo conosce, il comando non
+     * parte affatto.
+     */
+    private fun sendCuConfig(cu: ControlUnit, command1: Int = 0) {
+        require(cu.pollingInterval > 0) {
+            "Periodo di poll non noto per la CU ${cu.deviceId}: un 0x0A con ΔT_Polling = 0 " +
+                    "spegnerebbe la CU in modo irreversibile. Configura prima il polling."
+        }
+
+        encoder.encodeCuConfig(
+                        pollingHours = cu.pollingInterval,
+                        setting1 = cu.setting1,
+                        command1 = command1,
+                )
+                .forEach { kcu.sendDownlink(cu.deviceId, it) }
     }
 
     override fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO {
@@ -374,6 +423,9 @@ class ControlUnitServiceImpl(
         cu.isCharging = c.isCharging
 
         cu.model = c.model
+        // Lo stato precedente serve prima di sovrascriverlo: il controllo di sanita' delle MU
+        // si chiede sul **fronte** di un bit, non finche' resta alzato.
+        val previousStatus = cu.statusWord
         cu.statusWord = c.statusRaw
         cu.statusAt = OffsetDateTime.now()
 
@@ -414,6 +466,67 @@ class ControlUnitServiceImpl(
             )
         }
 
+        cur.save(cu)
+        askMuCheckIfNeeded(cu, previousStatus, c.statusRaw)
+    }
+
+    /**
+     * Dopo un reset della CU o un cambio di topologia, il server chiede il controllo di
+     * sanita' delle MU (§ «Controllo di sanita'» della documentazione).
+     *
+     * Si chiede **sul fronte**: il bit appena comparso, non il bit alzato. I due bit sono di
+     * tipo *evento*, cioe' latchati finche' il server non li conferma — e il protocollo non
+     * ha ancora un campo per confermarli. Reagire alla presenza invece che alla comparsa
+     * significherebbe un downlink a ogni poll, cioe' uno ogni minuto sulle CU attuali.
+     */
+    private fun askMuCheckIfNeeded(cu: ControlUnit, previous: Int?, current: Int) {
+        val triggers = setOf("reset", "topology_changed")
+        val before = protocolService.statusFlags(previous).map { it.meaning }.toSet()
+        val now = protocolService.statusFlags(current).map { it.meaning }.toSet()
+        val appeared = (now - before).intersect(triggers)
+        if (appeared.isEmpty()) return
+
+        // Senza periodo di poll non si puo' comporre una 0x0A: il comando non parte, ma il
+        // motivo va detto, perche' altrimenti la topologia resta disallineata in silenzio.
+        if (cu.pollingInterval <= 0) {
+            log.warn(
+                    "CU devEUI={}: {} ma il periodo di poll non e' noto, controllo di sanita' delle MU non richiesto",
+                    cu.devEui,
+                    appeared.joinToString(),
+            )
+            return
+        }
+
+        sendCuConfig(cu, command1 = COMMAND1_MU_CHECK)
+        log.info(
+                "CU devEUI={}: {} -> chiesto il controllo di sanita' delle MU",
+                cu.devEui,
+                appeared.joinToString(),
+        )
+    }
+
+    /**
+     * L'ultimo contatto, su **qualunque** messaggio arrivi dalla CU.
+     *
+     * Prima lo scriveva solo il ramo della qualita' del segnale, che e' un canale laterale:
+     * una CU che pollava regolarmente ma il cui messaggio di metadati radio si perdeva
+     * risultava offline. Il poll e' letteralmente il dispositivo che dice «sono qui», ed era
+     * l'unico a non registrarlo.
+     *
+     * L'istante non torna mai indietro: rileggendo un arretrato di Kafka, i messaggi vecchi
+     * non devono far sembrare la CU ferma a ore prima.
+     */
+    @Transactional
+    fun touch(devEui: Long, timestamp: String?) {
+        val cu = cur.findByDevEui(devEui) ?: return
+        val seen =
+                timestamp?.let { runCatching { OffsetDateTime.parse(it).toLocalDateTime() }.getOrNull() }
+                        // Come il ramo della qualita' del segnale: l'istante e' UTC, perche'
+                        // UTC e' quello che arriva da TTN e quello con cui si confronta.
+                        ?: LocalDateTime.now(java.time.ZoneOffset.UTC)
+        val known = cu.lastSeen
+        if (known != null && known.isAfter(seen)) return
+        cu.lastSeen = seen
         cur.save(cu)
     }
 

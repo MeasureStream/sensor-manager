@@ -461,16 +461,30 @@ class ControlUnitServiceTest {
     }
 
     @Test
-    fun `senza periodo di poll la 0x0A non parte`() {
-        // ΔT_Polling = 0 e' lo spegnimento definitivo e irreversibile: meglio non mandare
-        // niente che spegnere una CU per chiederle la topologia.
-        val cu = ControlUnit().apply { id = 7; devEui = 111L; deviceId = "lora-e5"; pollingInterval = 0 }
+    fun `senza periodo di poll si usa il valore di prova, e lo si registra`() {
+        // Zero non si manda: per la documentazione e' lo spegnimento irreversibile. Il
+        // valore di prova e' una scorciatoia dichiarata (STATO_LAVORI.md): si scrive sulla
+        // CU perche' il modello del server resti uguale a cio' che il dispositivo applica,
+        // e perche' succeda una volta sola.
+        val cu = ControlUnit().apply {
+            id = 7
+            devEui = 111L
+            deviceId = "lora-e5"
+            name = "Mai configurata"
+            pollingInterval = 0
+        }
 
         every { ss.isAdmin() } returns true
         every { cur.findByIdOrNull(7L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+        every { ts.getTemplate(any()) } returns null
+        every { ts.getDocument(any()) } returns null
 
-        assertThrows<IllegalArgumentException> { service.requestMuCheck(7L) }
-        verify(exactly = 0) { encoder.encodeCuConfig(any(), any(), any(), any()) }
+        service.requestMuCheck(7L)
+
+        assertEquals(1, cu.pollingInterval, "il valore inventato si registra, non resta implicito")
+        verify { encoder.encodeCuConfig(1, any(), any(), 1) }
     }
 
     @Test

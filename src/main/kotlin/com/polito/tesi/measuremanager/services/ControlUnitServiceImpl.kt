@@ -50,6 +50,14 @@ import org.springframework.stereotype.Service
  */
 private const val COMMAND1_MU_CHECK = 0x01
 
+/**
+ * Periodo di poll usato quando il server non ne conosce ancora uno, per poter comporre una
+ * 0x0A su una CU mai configurata. **E' una scorciatoia di prova**, non un default di
+ * progetto: la configurazione di un dispositivo andrebbe decisa, non inventata dal server.
+ * Sta in `STATO_LAVORI.md` fra le scorciatoie da togliere.
+ */
+private const val DEFAULT_POLLING_HOURS = 1
+
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
@@ -226,9 +234,28 @@ class ControlUnitServiceImpl(
      * parte affatto.
      */
     private fun sendCuConfig(cu: ControlUnit, command1: Int = 0) {
-        require(cu.pollingInterval > 0) {
-            "Periodo di poll non noto per la CU ${cu.deviceId}: un 0x0A con ΔT_Polling = 0 " +
-                    "spegnerebbe la CU in modo irreversibile. Configura prima il polling."
+        if (cu.pollingInterval <= 0) {
+            // SCORCIATOIA DI PROVA — vedi STATO_LAVORI.md, «Scorciatoie da togliere».
+            //
+            // Zero non si manda: per la documentazione e' lo spegnimento definitivo e
+            // irreversibile. Inventare un'ora non e' molto meglio, perche' una richiesta
+            // diagnostica finisce per **configurare** la CU con un periodo che nessuno ha
+            // scelto. Si accetta per poter provare il controllo di sanita' su CU non ancora
+            // configurate, e il valore si registra subito: cosi' succede una volta sola per
+            // dispositivo e il modello del server resta uguale a cio' che la CU applica.
+            //
+            // Oggi non ha effetto sul campo perche' il firmware ignora il campo
+            // (CU_DEBUG_FIXED_POLL in cu_config.h tiene il poll a 60 s). Diventa vero il
+            // giorno in cui quella define sparisce: e' quello il momento in cui questa
+            // scorciatoia va tolta, non prima e non dopo.
+            log.warn(
+                    "CU devEUI={}: periodo di poll non noto, uso il valore di prova di {} h. " +
+                            "E' una scorciatoia: la configurazione andrebbe decisa, non inventata.",
+                    cu.devEui,
+                    DEFAULT_POLLING_HOURS,
+            )
+            cu.pollingInterval = DEFAULT_POLLING_HOURS
+            cur.save(cu)
         }
 
         encoder.encodeCuConfig(

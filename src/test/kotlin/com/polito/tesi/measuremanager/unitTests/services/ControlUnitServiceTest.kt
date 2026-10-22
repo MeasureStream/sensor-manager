@@ -26,6 +26,7 @@ import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ReportDecoder
+import com.polito.tesi.measuremanager.template.StatusBit
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
@@ -401,6 +402,117 @@ class ControlUnitServiceTest {
 
         assertEquals(0, cu.configVersion)
         verify(exactly = 0) { configSnapshots.take(any()) }
+    }
+
+    /* ------------------------------------------- ultimo contatto e sanita' MU */
+
+    @Test
+    fun `l'ultimo contatto si aggiorna su qualunque uplink`() {
+        val cu = ControlUnit().apply { devEui = 111L; deviceId = "lora-e5" }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.touch(111L, "2026-10-22T10:15:30Z")
+
+        assertEquals(2026, cu.lastSeen?.year)
+        assertEquals(10, cu.lastSeen?.hour, "l'istante e' UTC, come quello che arriva da TTN")
+    }
+
+    @Test
+    fun `l'ultimo contatto non torna indietro`() {
+        // Rileggendo un arretrato di Kafka i messaggi vecchi non devono far sembrare la CU
+        // ferma a ore prima.
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            lastSeen = java.time.LocalDateTime.parse("2026-10-22T12:00:00")
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+
+        service.touch(111L, "2026-10-22T09:00:00Z")
+
+        assertEquals(12, cu.lastSeen?.hour)
+        verify(exactly = 0) { cur.save(any()) }
+    }
+
+    @Test
+    fun `il controllo di sanita' delle MU parte con il bit 0 di Command1`() {
+        val cu = ControlUnit().apply {
+            id = 7
+            devEui = 111L
+            deviceId = "lora-e5"
+            name = "LabMS"
+            pollingInterval = 1
+            setting1 = 0
+        }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(7L) } returns cu
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+        every { ts.getTemplate(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+
+        service.requestMuCheck(7L)
+
+        verify { encoder.encodeCuConfig(1, any(), 0, 1) }
+    }
+
+    @Test
+    fun `senza periodo di poll si usa il valore di prova, e lo si registra`() {
+        // Zero non si manda: per la documentazione e' lo spegnimento irreversibile. Il
+        // valore di prova e' una scorciatoia dichiarata (STATO_LAVORI.md): si scrive sulla
+        // CU perche' il modello del server resti uguale a cio' che il dispositivo applica,
+        // e perche' succeda una volta sola.
+        val cu = ControlUnit().apply {
+            id = 7
+            devEui = 111L
+            deviceId = "lora-e5"
+            name = "Mai configurata"
+            pollingInterval = 0
+        }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(7L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+        every { ts.getTemplate(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+
+        service.requestMuCheck(7L)
+
+        assertEquals(1, cu.pollingInterval, "il valore inventato si registra, non resta implicito")
+        verify { encoder.encodeCuConfig(1, any(), any(), 1) }
+    }
+
+    @Test
+    fun `il bit di topologia cambiata chiede la sanita' una volta sola`() {
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            pollingInterval = 1
+            statusWord = null
+        }
+        val cambiata = listOf(
+                StatusBit(bit = 12, kind = "event", meaning = "topology_changed",
+                        description = "Topologia MU cambiata"))
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(null) } returns emptyList()
+        every { protocol.statusFlags(0x1000) } returns cambiata
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+
+        // Primo poll con il bit alzato: e' un fronte, si chiede.
+        service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
+        verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
+
+        // Il bit e' latchato e resta alzato: non si richiede a ogni poll, altrimenti sarebbe
+        // un downlink al minuto.
+        service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
+        verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
     }
 
     private fun poll(configVersion: Int, appliedCmdSeq: Int? = null, statusRaw: Int = 0) =

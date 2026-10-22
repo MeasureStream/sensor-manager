@@ -31,6 +31,22 @@ class TopologyDecoder {
 
     fun decode(bytes: ByteArray, fport: Int): List<MuEntry> {
         val recordSize = if (fport == FPort.TOPOLOGY) 5 else 4
+
+        // Nessuna MU connessa: un byte solo, 0x00. Non e' un payload vuoto perche' LoRaWAN
+        // include la FPort solo quando c'e' un payload, e senza FPort il server non saprebbe
+        // nemmeno che messaggio e'. Un byte non si confonde con una lista: ogni MU ne occupa
+        // cinque. E' la risposta che arriva quando l'ultima MU viene staccata, quindi
+        // scartarla significherebbe non accorgersi mai di un distacco.
+        if (fport == FPort.TOPOLOGY && bytes.size == 1) {
+            if (bytes[0].toInt() != 0) {
+                throw TopologyPayloadError(
+                        "${FPort.label(fport)}: un byte solo vale 0x00 (nessuna MU), ricevuto 0x%02X"
+                                .format(bytes[0].toInt() and 0xFF)
+                )
+            }
+            return emptyList()
+        }
+
         if (bytes.isEmpty() || bytes.size % recordSize != 0) {
             throw TopologyPayloadError(
                     "${FPort.label(fport)}: ${bytes.size} byte non sono un multiplo di $recordSize"

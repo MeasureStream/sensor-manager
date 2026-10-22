@@ -81,6 +81,20 @@ class ControlUnitController(
         return cs.acknowledgeFrames(id)
     }
 
+    /**
+     * Chiede alla CU il controllo di sanita' delle MU: una 0x0A con il bit 0 di `Command1`.
+     *
+     * La CU risponde sempre con una notifica di topologia 0x11, anche se non e' cambiato
+     * nulla e anche con zero MU. E' il modo per riallineare la topologia quando una MU viene
+     * staccata senza che il dispositivo se ne accorga: la risposta arriva in modo asincrono,
+     * quindi questa chiamata restituisce la CU com'e' adesso, non come sara'.
+     */
+    @PostMapping("/{id}/mu-check")
+    fun requestMuCheck(@PathVariable id: Long): ControlUnitDTO {
+        log.info("Controllo di sanita' delle MU richiesto per la Control Unit {}", id)
+        return cs.requestMuCheck(id)
+    }
+
     @PostMapping("/polling", "/polling/")
     fun configureCU(@RequestBody command: CUConfigCommandDTO) {
         log.info("Ricevuto comando POLLING per EUI: {}", command.devEui)

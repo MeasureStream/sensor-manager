@@ -33,6 +33,12 @@ interface ControlUnitService {
      */
     fun acknowledgeFrames(controlUnitId: Long): ControlUnitDTO
 
+    /**
+     * Chiede alla CU il controllo di sanita' delle MU (bit 0 di `Command1` nella 0x0A). La
+     * risposta — una notifica di topologia 0x11 — arriva in modo asincrono.
+     */
+    fun requestMuCheck(controlUnitId: Long): ControlUnitDTO
+
     fun onJoinNotification(c: CuJoinNotification)
 
     fun onStatusUpdate(c: CuStatusUpdate)

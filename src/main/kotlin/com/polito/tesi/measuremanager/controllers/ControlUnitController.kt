@@ -76,6 +76,18 @@ class ControlUnitController(
         return cs.getFrames(id)
     }
 
+    /**
+     * Presa in carico di un singolo evento: e' la X sul badge dell'avviso.
+     *
+     * La riga resta nello storico con l'istante in cui e' stata vista: sparisce solo
+     * dall'elenco di cio' che e' aperto adesso.
+     */
+    @PostMapping("/{id}/events/{eventId}/acknowledge")
+    fun acknowledgeEvent(@PathVariable id: Long, @PathVariable eventId: Long): DeviceEventDTO {
+        log.info("Presa in carico dell'evento {} della Control Unit {}", eventId, id)
+        return cs.acknowledgeEvent(id, eventId)
+    }
+
     /** Presa in carico: azzera i contatori dei report scartati, i frame restano. */
     @PostMapping("/{id}/frames/acknowledge")
     fun acknowledgeFrames(@PathVariable id: Long): ControlUnitDTO {

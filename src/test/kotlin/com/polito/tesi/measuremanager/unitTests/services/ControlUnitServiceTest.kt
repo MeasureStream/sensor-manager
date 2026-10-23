@@ -26,7 +26,11 @@ import com.polito.tesi.measuremanager.repositories.SensorAlarmRepository
 import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
+import com.polito.tesi.measuremanager.entities.DeviceEvent
+import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
+import com.polito.tesi.measuremanager.services.ServerEventRecorder
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
@@ -62,7 +66,14 @@ class ControlUnitServiceTest {
     private val reportDecoder = mockk<ReportDecoder>(relaxed = true)
     private val configSnapshots = mockk<ConfigSnapshotService>(relaxed = true)
     private val alarmRepo = mockk<SensorAlarmRepository>(relaxed = true)
-    private val eventRepo = mockk<DeviceEventRepository>(relaxed = true)
+    /*
+     * Il taccuino degli eventi lo tocca quasi ogni poll, quindi la risposta di `save` serve
+     * ovunque: un simulacro rilassato restituirebbe un Object e il cast al tipo generico
+     * fallirebbe in metodi che con gli eventi non c'entrano niente.
+     */
+    private val eventRepo = mockk<DeviceEventRepository>(relaxed = true).also {
+        every { it.save(any<DeviceEvent>()) } answers { firstArg() }
+    }
     private val encoder = mockk<LorawanPayloadEncoder>()
 
     /**
@@ -71,9 +82,13 @@ class ControlUnitServiceTest {
      */
     private val planner = SensorConfigPlanner(protocol)
 
+    /** Anche il taccuino degli eventi e' quello vero: la regola che conta sta dentro di lui. */
+    private val serverEvents = ServerEventRecorder(eventRepo)
+
     private val service = ControlUnitServiceImpl(
                     cur, mur, mr, sqr, ss, kcu, ts, muModel, protocol, frames, samples,
                     reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder, planner,
+                    serverEvents,
             )
 
     /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
@@ -530,6 +545,98 @@ class ControlUnitServiceTest {
         // un downlink al minuto.
         service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
         verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
+    }
+
+    // --- TEST: il taccuino degli eventi del server ---
+
+    @Test
+    fun `la topologia cambiata diventa una riga negli eventi`() {
+        val cu = ControlUnit().apply {
+            id = 5
+            devEui = 111L
+            deviceId = "lora-e5"
+            pollingInterval = 1
+        }
+        val cambiata = listOf(
+                StatusBit(bit = 12, kind = "event", meaning = "topology_changed",
+                        description = "Topologia MU cambiata"))
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(null) } returns emptyList()
+        every { protocol.statusFlags(0x1000) } returns cambiata
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+        every {
+            eventRepo.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+                    5L, EventOrigin.STATUS, 12)
+        } returns emptyList()
+        every { eventRepo.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
+
+        // Il badge e la scheda «Eventi e diagnostica» guardano la stessa riga: prima il
+        // disallineamento viveva come stato corrente e li' non compariva mai.
+        verify(exactly = 1) {
+            eventRepo.save(match<DeviceEvent> {
+                it.origin == EventOrigin.STATUS && it.code == 12
+            })
+        }
+    }
+
+    @Test
+    fun `il disallineamento e' un evento solo, non uno per poll`() {
+        // realign viene chiamata a ogni poll finche' i conti non tornano, cioe' una volta al
+        // minuto: senza la regola dell'evento aperto, la scheda diventerebbe illeggibile in
+        // un'ora.
+        val cu = ControlUnit().apply {
+            id = 5
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 7
+            cmdSeq = 4
+        }
+        val aperto = DeviceEvent(
+                id = 1,
+                controlUnit = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+        )
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(any()) } returns emptyList()
+        every { eventRepo.save(any()) } answers { firstArg() }
+        every {
+            eventRepo.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+                    5L, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
+        } returnsMany listOf(emptyList(), listOf(aperto))
+
+        service.onStatusUpdate(poll(configVersion = 5, appliedCmdSeq = 3))
+        service.onStatusUpdate(poll(configVersion = 5, appliedCmdSeq = 3))
+
+        verify(exactly = 1) { eventRepo.save(any<DeviceEvent>()) }
+    }
+
+    @Test
+    fun `la presa in carico non cancella la riga, la marca`() {
+        val cu = ControlUnit().apply { id = 5; devEui = 111L; deviceId = "lora-e5" }
+        val evento = DeviceEvent(
+                id = 9,
+                controlUnit = cu,
+                origin = EventOrigin.STATUS,
+                code = 12,
+                description = "Topologia MU cambiata",
+        )
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(5L) } returns cu
+        every { eventRepo.findByIdOrNull(9L) } returns evento
+        every { eventRepo.save(any()) } answers { firstArg() }
+
+        val dto = service.acknowledgeEvent(5L, 9L)
+
+        assertTrue(dto.acknowledged, "l'avviso sparisce dagli aperti")
+        assertNotNull(evento.acknowledgedAt, "ma la riga resta, con l'istante in cui e' stata vista")
     }
 
     // --- TEST: configurazione dei sensori ---

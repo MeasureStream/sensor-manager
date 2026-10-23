@@ -24,6 +24,9 @@ interface ControlUnitService {
     /** Gli eventi di diagnostica ricevuti da una CU, dal piu' recente. */
     fun getEvents(controlUnitId: Long): List<DeviceEventDTO>
 
+    /** Presa in carico di un singolo evento: lo toglie dagli aperti, non dallo storico. */
+    fun acknowledgeEvent(controlUnitId: Long, eventId: Long): DeviceEventDTO
+
     /** Gli ultimi frame ricevuti da una CU, con l'esito della lettura. */
     fun getFrames(controlUnitId: Long): List<UplinkFrameDTO>
 

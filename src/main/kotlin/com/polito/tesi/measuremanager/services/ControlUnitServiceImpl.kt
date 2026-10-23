@@ -2,7 +2,9 @@ package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.entities.ControlUnit
+import com.polito.tesi.measuremanager.entities.EventOrigin
 import com.polito.tesi.measuremanager.entities.Measurement
+import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.entities.SignalQuality
@@ -34,6 +36,7 @@ import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.ReportTruncated
 import com.polito.tesi.measuremanager.template.StatBitmap
+import com.polito.tesi.measuremanager.template.StatusBit
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
@@ -81,6 +84,7 @@ class ControlUnitServiceImpl(
         private val deviceEvents: DeviceEventRepository,
         private val encoder: LorawanPayloadEncoder,
         private val planner: SensorConfigPlanner,
+        private val serverEvents: ServerEventRecorder,
 ) : ControlUnitService {
 
     private val log = LoggerFactory.getLogger(ControlUnitServiceImpl::class.java)
@@ -667,7 +671,23 @@ class ControlUnitServiceImpl(
         }
 
         cur.save(cu)
-        askMuCheckIfNeeded(cu, previousStatus, c.statusRaw)
+
+        // I bit appena comparsi si calcolano una volta sola: servono a due lettori che
+        // devono vedere lo stesso fronte — il taccuino degli eventi e la richiesta di sanita'.
+        val appeared = appearedFlags(previousStatus, c.statusRaw)
+        serverEvents.recordStatusEvents(cu, appeared)
+        askMuCheckIfNeeded(cu, appeared)
+    }
+
+    /**
+     * I bit che compaiono adesso e prima non c'erano.
+     *
+     * Il confronto e' sui significati e non sui numeri grezzi perche' il dizionario e' la
+     * fonte: se un giorno un bit cambia posizione, qui non cambia niente.
+     */
+    private fun appearedFlags(previous: Int?, current: Int): List<StatusBit> {
+        val before = protocolService.statusFlags(previous).map { it.meaning }.toSet()
+        return protocolService.statusFlags(current).filter { it.meaning !in before }
     }
 
     /**
@@ -679,11 +699,9 @@ class ControlUnitServiceImpl(
      * ha ancora un campo per confermarli. Reagire alla presenza invece che alla comparsa
      * significherebbe un downlink a ogni poll, cioe' uno ogni minuto sulle CU attuali.
      */
-    private fun askMuCheckIfNeeded(cu: ControlUnit, previous: Int?, current: Int) {
+    private fun askMuCheckIfNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
         val triggers = setOf("reset", "topology_changed")
-        val before = protocolService.statusFlags(previous).map { it.meaning }.toSet()
-        val now = protocolService.statusFlags(current).map { it.meaning }.toSet()
-        val appeared = (now - before).intersect(triggers)
+        val appeared = appearedFlags.map { it.meaning }.filter { it in triggers }
         if (appeared.isEmpty()) return
 
         // Senza periodo di poll non si puo' comporre una 0x0A: il comando non parte, ma il
@@ -1127,6 +1145,9 @@ class ControlUnitServiceImpl(
             cu.configVersion += (reported - expected) and 0xFF
             cur.save(cu)
             snapshots.take(cu)
+            // I conti tornano: se era aperto un avviso «comando non applicato», si chiude da
+            // solo. Un avviso che resta quando non vale piu' insegna a ignorare gli avvisi.
+            serverEvents.close(cu, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
             log.warn(
                     "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
                     cu.devEui,
@@ -1144,6 +1165,18 @@ class ControlUnitServiceImpl(
                 expected,
                 appliedCmdSeq ?: "non dichiarato",
                 cu.cmdSeq,
+        )
+
+        // Finora questo disallineamento viveva solo come confronto fra due numeri: vero
+        // adesso, senza storia, e invisibile nella scheda degli eventi. Diventa una riga, una
+        // sola finche' resta aperta, che l'utente puo' prendere in carico.
+        serverEvents.record(
+                cu = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+                description =
+                        "Configurazione non applicata: la CU dichiara CFG_VER $reported, il server attende $expected " +
+                                "(comando applicato ${appliedCmdSeq ?: "non dichiarato"} contro ${cu.cmdSeq} inviato)",
         )
     }
 
@@ -1275,6 +1308,33 @@ class ControlUnitServiceImpl(
         return deviceEvents.findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map {
             it.toDTO()
         }
+    }
+
+    /**
+     * Presa in carico di un singolo evento: e' la X sul badge.
+     *
+     * Non cancella e non nasconde la storia — la riga resta, con l'istante in cui e' stata
+     * vista. Toglie solo l'avviso dalla vista di «cosa c'e' di aperto adesso», che e' quello
+     * che l'utente chiede quando ha gia' capito e risolto. E se il fatto si ripete, il
+     * taccuino ne scrive uno nuovo.
+     */
+    @Transactional
+    override fun acknowledgeEvent(controlUnitId: Long, eventId: Long): DeviceEventDTO {
+        ownedControlUnit(controlUnitId)
+        val event =
+                deviceEvents.findByIdOrNull(eventId)?.takeIf {
+                    it.controlUnit?.id == controlUnitId
+                }
+                        ?: throw EntityNotFoundException(
+                                "Evento $eventId non trovato sulla Control Unit $controlUnitId"
+                        )
+
+        if (event.acknowledgedAt == null) {
+            event.acknowledgedAt = OffsetDateTime.now()
+            deviceEvents.save(event)
+            log.info("CU {}: evento {} preso in carico", controlUnitId, eventId)
+        }
+        return event.toDTO()
     }
 
     override fun getFrames(controlUnitId: Long): List<UplinkFrameDTO> {

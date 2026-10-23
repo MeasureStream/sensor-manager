@@ -3,9 +3,26 @@ package com.polito.tesi.measuremanager.entities
 import jakarta.persistence.*
 import jakarta.validation.constraints.*
 import java.time.LocalDateTime
+import org.hibernate.annotations.DynamicUpdate
 import org.springframework.data.geo.Point
 
+/**
+ * La riga della CU la scrivono due consumatori Kafka in parallelo: il ramo degli uplink
+ * (`lora-uplink`, che applica stato, CFG_VER e ultimo contatto) e quello della qualita' del
+ * segnale (`ttn-uplink-signal-quality`, che aggiorna RSSI, data rate, airtime e f_cnt). Sono
+ * campi diversi, quindi logicamente non si pestano i piedi.
+ *
+ * Senza [DynamicUpdate] pero' Hibernate scrive **tutte** le colonne a ogni salvataggio, anche
+ * quelle che la transazione non ha toccato: l'ultima a chiudere riporta indietro il lavoro
+ * dell'altra con la copia che aveva letto all'inizio. E' il motivo per cui `lastfcnt` e'
+ * rimasto inchiodato a 72 mentre i log contavano 89, con l'avviso sugli uplink persi che
+ * cresceva a ogni poll su un confronto falso.
+ *
+ * Con l'annotazione ogni transazione aggiorna solo le colonne che ha davvero cambiato, e le
+ * due scritture smettono di sovrascriversi.
+ */
 @Entity
+@DynamicUpdate
 class ControlUnit {
     @Id @GeneratedValue(strategy = GenerationType.AUTO) var id: Long = 0
 

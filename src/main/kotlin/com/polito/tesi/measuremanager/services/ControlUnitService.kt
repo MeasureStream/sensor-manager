@@ -56,6 +56,15 @@ interface ControlUnitService {
 
     fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO
 
+    /**
+     * La configurazione dei sensori come la prepara la schermata dedicata: periodi e funzioni
+     * di elaborazione insieme, raggruppati per valore. Restituisce cosa e' partito davvero.
+     */
+    fun applySensorConfig(
+            controlUnitId: Long,
+            command: SensorConfigCommandSetDTO,
+    ): SensorConfigResultDTO
+
     fun sendTransmissionCommand(command: CUTransmissionCommandDTO): CUTransmissionCommandDTO
 
     fun updateMetadata(id: Long, newName: String?, newSemanticLocation: String?): ControlUnitDTO

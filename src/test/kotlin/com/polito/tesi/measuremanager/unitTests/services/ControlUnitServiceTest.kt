@@ -4,13 +4,19 @@ import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.MuDescriptor
+import com.polito.tesi.measuremanager.dtos.ProcessingCommandDTO
+import com.polito.tesi.measuremanager.dtos.SamplingCommandDTO
+import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
+import com.polito.tesi.measuremanager.dtos.SensorSelectorDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
+import com.polito.tesi.measuremanager.kafka.EncodedPayload
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
+import com.polito.tesi.measuremanager.uplink.FPort
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
@@ -27,12 +33,14 @@ import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.StatusBit
+import com.polito.tesi.measuremanager.sensorconfig.SensorConfigPlanner
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.assertThrows
 import org.springframework.data.repository.findByIdOrNull
 
@@ -57,9 +65,15 @@ class ControlUnitServiceTest {
     private val eventRepo = mockk<DeviceEventRepository>(relaxed = true)
     private val encoder = mockk<LorawanPayloadEncoder>()
 
+    /**
+     * Il pianificatore non ha stato e dipende solo dal dizionario: si usa quello vero, cosi'
+     * le prove verificano anche l'espansione dei selettori invece di fidarsi di un simulacro.
+     */
+    private val planner = SensorConfigPlanner(protocol)
+
     private val service = ControlUnitServiceImpl(
                     cur, mur, mr, sqr, ss, kcu, ts, muModel, protocol, frames, samples,
-                    reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder,
+                    reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder, planner,
             )
 
     /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
@@ -312,6 +326,9 @@ class ControlUnitServiceTest {
         every { ss.isAdmin() } returns true
         every { cur.findByDevEui(111L) } returns cu
         every { cur.save(any()) } answers { firstArg() }
+        // Il CMD_SEQ lo assegna il database con una istruzione sola: qui si simula il giro.
+        every { cur.bumpCmdSeq(any()) } returns 1
+        every { cur.readCmdSeq(any()) } returns 7
         every { encoder.encodeTransmissionConfig(any(), any()) } returns emptyList()
 
         service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
@@ -513,6 +530,134 @@ class ControlUnitServiceTest {
         // un downlink al minuto.
         service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
         verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
+    }
+
+    // --- TEST: configurazione dei sensori ---
+
+    /** Una CU con una MU da quattro slot, pronta a ricevere una configurazione. */
+    private fun cuConfigurabile() =
+            ControlUnit().apply {
+                id = 42
+                devEui = 111L
+                deviceId = "cu-0001001"
+                name = "Marco's CU"
+                pollingInterval = 1
+                transmissionInterval = 1
+                measurementUnits = mutableListOf(mu0001(65537L, 1))
+            }
+
+    @Test
+    fun `la configurazione sensori manda un comando per ogni cosa che cambia`() {
+        val cu = cuConfigurabile()
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        // L'allocatore atomico: il numero lo decide il database.
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returnsMany listOf(4, 5)
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1, 2, 3), FPort.PERIODS))
+        every { encoder.encodeStatsAndThresholds(any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(4, 5), FPort.STATS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                sampling =
+                                        listOf(
+                                                SamplingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        periodIndex = 65,
+                                                )
+                                        ),
+                                processing =
+                                        listOf(
+                                                ProcessingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        measure = "mm",
+                                                )
+                                        ),
+                        ),
+                )
+
+        assertEquals(2, esito.commands.size, "periodi sulla 0x21, elaborazione sulla 0x23")
+        assertEquals(listOf(FPort.PERIODS, FPort.STATS), esito.commands.map { it.fPort })
+        assertEquals(listOf(4, 5), esito.commands.map { it.cmdSeq }, "due comandi, due CMD_SEQ distinti")
+        // Il CFG_VER conta i comandi che la CU applichera', non le richieste HTTP.
+        assertEquals(2L, cu.configVersion)
+        verify(exactly = 2) { kcu.sendDownlink("cu-0001001", any()) }
+        // Lo stato desiderato resta scritto anche se la consegna dovesse fallire.
+        assertEquals(65.0, cu.measurementUnits.first().sensors.first().samplingF)
+        assertEquals("max-min", cu.measurementUnits.first().sensors.first().configurationMeasure)
+    }
+
+    @Test
+    fun `una configurazione che non cambia niente non occupa l'aria`() {
+        val cu = cuConfigurabile()
+        cu.measurementUnits.flatMap { it.sensors }.forEach { it.samplingF = 65.0 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                sampling =
+                                        listOf(
+                                                SamplingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        periodIndex = 65,
+                                                )
+                                        )
+                        ),
+                )
+
+        assertTrue(esito.commands.isEmpty())
+        assertEquals(0L, cu.configVersion, "nessun comando, nessun incremento da aspettarsi")
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+        verify(exactly = 0) { cur.bumpCmdSeq(any()) }
+    }
+
+    @Test
+    fun `il CMD_SEQ lo assegna il database, non la copia in memoria`() {
+        // Due richieste parallele leggevano lo stesso numero e lo usavano entrambe: la CU
+        // riconosceva la seconda come ritrasmissione e la scartava. Ora il numero arriva da
+        // un'istruzione sola, e la copia in memoria si limita a seguirlo.
+        val cu = cuConfigurabile()
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returns 200
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1), FPort.PERIODS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        service.applySensorConfig(
+                42L,
+                SensorConfigCommandSetDTO(
+                        sampling =
+                                listOf(
+                                        SamplingCommandDTO(
+                                                SensorSelectorDTO(kind = "broadcast"),
+                                                periodIndex = 65,
+                                        )
+                                )
+                ),
+        )
+
+        assertEquals(200, cu.cmdSeq)
+        verify { encoder.encodePeriods(any(), 200, 1) }
     }
 
     private fun poll(configVersion: Int, appliedCmdSeq: Int? = null, statusRaw: Int = 0) =

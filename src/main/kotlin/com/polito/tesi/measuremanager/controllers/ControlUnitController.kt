@@ -6,6 +6,8 @@ import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
 import com.polito.tesi.measuremanager.dtos.MeasureCUConfigRequest
+import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
+import com.polito.tesi.measuremanager.dtos.SensorConfigResultDTO
 import com.polito.tesi.measuremanager.dtos.AlarmDTO
 import com.polito.tesi.measuremanager.dtos.DeviceEventDTO
 import com.polito.tesi.measuremanager.dtos.UplinkFrameDTO
@@ -93,6 +95,29 @@ class ControlUnitController(
     fun requestMuCheck(@PathVariable id: Long): ControlUnitDTO {
         log.info("Controllo di sanita' delle MU richiesto per la Control Unit {}", id)
         return cs.requestMuCheck(id)
+    }
+
+    /**
+     * La configurazione dei sensori preparata dalla schermata dedicata.
+     *
+     * Risponde **200 con il resoconto**, non 202: l'interfaccia deve poter distinguere
+     * «partito» da «partito a meta'», e il corpo elenca i comandi usciti e cosa non e' stato
+     * applicato. Un endpoint che risponde sempre di si' toglie a chi configura l'unico indizio
+     * che aveva.
+     */
+    @PostMapping("/{id}/sensor-config")
+    fun applySensorConfig(
+            @PathVariable id: Long,
+            @RequestBody command: SensorConfigCommandSetDTO,
+    ): SensorConfigResultDTO {
+        log.info(
+                "Configurazione sensori per la Control Unit {}: {} periodi, {} elaborazioni, {} soglie",
+                id,
+                command.sampling.size,
+                command.processing.size,
+                command.thresholds.size,
+        )
+        return cs.applySensorConfig(id, command)
     }
 
     @PostMapping("/polling", "/polling/")

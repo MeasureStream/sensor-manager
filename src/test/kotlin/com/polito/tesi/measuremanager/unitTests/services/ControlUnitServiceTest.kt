@@ -2,6 +2,7 @@ package com.polito.tesi.measuremanager.unitTests.services
 
 import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
+import com.polito.tesi.measuremanager.dtos.CuMeasuresUpdate
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.MuDescriptor
 import com.polito.tesi.measuremanager.dtos.ProcessingCommandDTO
@@ -9,6 +10,7 @@ import com.polito.tesi.measuremanager.dtos.SamplingCommandDTO
 import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
 import com.polito.tesi.measuremanager.dtos.SensorSelectorDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
+import com.polito.tesi.measuremanager.entities.UplinkFrame
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
@@ -36,11 +38,13 @@ import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ReportDecoder
+import com.polito.tesi.measuremanager.template.ReportTruncated
 import com.polito.tesi.measuremanager.template.StatusBit
 import com.polito.tesi.measuremanager.sensorconfig.SensorConfigPlanner
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
+import java.nio.ByteBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -61,7 +65,10 @@ class ControlUnitServiceTest {
     private val muModel = mockk<MuModelService>()
     // Il dizionario di protocollo serve solo allo stato online: qui basta che non risolva.
     private val protocol = mockk<ProtocolService>(relaxed = true)
-    private val frames = mockk<UplinkFrameRepository>(relaxed = true)
+    /* Come per gli eventi: il tipo generico di `save` va risolto, o il cast fallisce. */
+    private val frames = mockk<UplinkFrameRepository>(relaxed = true).also {
+        every { it.save(any<UplinkFrame>()) } answers { firstArg() }
+    }
     private val samples = mockk<MetricSampleRepository>(relaxed = true)
     private val reportDecoder = mockk<ReportDecoder>(relaxed = true)
     private val configSnapshots = mockk<ConfigSnapshotService>(relaxed = true)
@@ -545,6 +552,70 @@ class ControlUnitServiceTest {
         // un downlink al minuto.
         service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
         verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
+    }
+
+    // --- TEST: lettura del report ---
+
+    @Test
+    fun `nel report i sensori spenti non occupano posto`() {
+        /*
+         * Lo pseudocodice di decodifica della 0x30 e' esplicito: si legge uno slot «se il
+         * sensore e' attivo (Sampl. T diverso da 0)». Il server contava anche gli spenti, e
+         * su due MU con l'accelerometro a OFF si aspettava 8 slot invece di 6: dopo
+         * ventiquattro byte finiva il payload e il report veniva scartato per intero, ogni
+         * quindici secondi.
+         */
+        val cu = cuConfigurabile().apply {
+            configVersion = 5
+            measurementUnits = mutableListOf(mu0001(65537L, 1), mu0001(65538L, 2))
+        }
+        // Accelerometro spento, gli altri tre slot a 2 s: la configurazione della prova.
+        cu.measurementUnits.flatMap { it.sensors }.forEach {
+            it.samplingF = if (it.sensorIndex == 0) 0.0 else 47.0
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { ts.getDocument(any()) } returns null
+        every { ts.getTemplate(any()) } returns null
+        every { reportDecoder.expectedMetrics(any(), any()) } returns listOf("mean", "variance")
+        // Un simulacro del decoder che consuma i byte come farebbe quello vero.
+        every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
+            val buffer = firstArg<ByteBuffer>()
+            if (buffer.remaining() < 4) {
+                throw ReportTruncated("servivano 4 byte, ne restavano ${buffer.remaining()}")
+            }
+            buffer.position(buffer.position() + 4)
+            emptyList()
+        }
+
+        // I ventiquattro byte veri del simulatore: sei slot da media e varianza.
+        val payload =
+                java.util.Base64.getEncoder()
+                        .encodeToString(
+                                byteArrayOf(
+                                        0x27, 0xa5.toByte(), 0x00, 0x01,
+                                        0x6e, 0xfb.toByte(), 0xff.toByte(), 0xff.toByte(),
+                                        0x05, 0x33, 0x00, 0x76,
+                                        0x27, 0xc4.toByte(), 0x00, 0x02,
+                                        0x77, 0x28, 0xff.toByte(), 0xff.toByte(),
+                                        0x05, 0x74, 0x00, 0x7d,
+                                )
+                        )
+
+        service.onMeasuresUpdate(
+                CuMeasuresUpdate(
+                        devEui = 111L,
+                        deviceId = "cu-0001001",
+                        configVersion = 5,
+                        rawPayload = payload,
+                        timestamp = null,
+                        content = 0x01,
+                )
+        )
+
+        verify(exactly = 6) { reportDecoder.decodeSlot(any(), any(), any(), any()) }
+        assertEquals(0L, cu.decodeFailureCount, "il report si legge per intero, niente da scartare")
     }
 
     // --- TEST: il taccuino degli eventi del server ---

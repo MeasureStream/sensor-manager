@@ -65,6 +65,13 @@ private const val COMMAND1_MU_CHECK = 0x01
  */
 private const val DEFAULT_POLLING_HOURS = 1
 
+/**
+ * Indice di campionamento che vale «spento». Un sensore a zero non campiona, quindi non
+ * occupa posto nel report: e' la riga dello pseudocodice di decodifica della 0x30 che decide
+ * quali slot il server deve aspettarsi.
+ */
+private const val SAMPLING_OFF = 0
+
 @Service
 class ControlUnitServiceImpl(
         private val cur: ControlUnitRepository,
@@ -1038,19 +1045,32 @@ class ControlUnitServiceImpl(
         var noNewData = 0
         var notResponding = 0
 
-        // Ogni voce: lo slot da leggere e le metriche che porta. L'ordine e' quello del filo.
+        /*
+         * Ogni voce: lo slot da leggere e le metriche che porta. L'ordine e' quello del filo.
+         *
+         * **I sensori spenti non ci sono.** Lo dice lo pseudocodice di decodifica della 0x30:
+         * «per ogni sensore in ordine di indice nel modello di MU, *se il sensore e' attivo
+         * (Sampl. T diverso da 0)*». Un sensore con il periodo a zero non campiona e non
+         * occupa un byte nel report, quindi contarlo sposta tutte le letture successive di
+         * quattro byte e, quando i byte finiscono, il report viene scartato per intero.
+         *
+         * Con l'istantanea la domanda e' la stessa ma riferita ad allora: conta se lo slot
+         * era attivo **in quella configurazione**, non adesso.
+         */
         val plan: List<Pair<Sensor, List<String>>> =
                 if (snapshot == null) {
-                    sortedSensors.map { (_, sensor) ->
-                        sensor to
-                                reportDecoder.expectedMetrics(
-                                        sensor.configurationMeasure,
-                                        dto.content,
-                                )
-                    }
+                    sortedSensors
+                            .filter { (_, sensor) -> sensor.samplingF.toInt() != SAMPLING_OFF }
+                            .map { (_, sensor) ->
+                                sensor to
+                                        reportDecoder.expectedMetrics(
+                                                sensor.configurationMeasure,
+                                                dto.content,
+                                        )
+                            }
                 } else {
                     val byId = sortedSensors.associate { (_, sensor) -> sensor.id to sensor }
-                    snapshot.slots.map { slot ->
+                    snapshot.slots.filter { it["active"] as? Boolean ?: true }.map { slot ->
                         val sensorId = (slot["sensorId"] as? Number)?.toLong()
                         val sensor = byId[sensorId]
                         if (sensor == null) {
@@ -1062,6 +1082,7 @@ class ControlUnitServiceImpl(
                                     expectedConfigVersion,
                                     "L'istantanea della configurazione ${dto.configVersion} cita il " +
                                             "sensore $sensorId, che non esiste piu'",
+                                    frame,
                             )
                             return
                         }
@@ -1082,6 +1103,21 @@ class ControlUnitServiceImpl(
             )
         }
 
+        // Dati senza nessuno slot che li aspetti: il server crede che tutti i sensori siano
+        // spenti mentre la CU sta trasmettendo. Leggere zero metriche e dichiarare il report
+        // «letto» sarebbe la perdita piu' silenziosa di tutte.
+        if (plan.isEmpty() && buffer.remaining() > 0) {
+            discardFrame(
+                    c,
+                    dto,
+                    expectedConfigVersion,
+                    "Il report porta ${buffer.remaining()} byte di dati ma per il server nessun " +
+                            "sensore e' attivo: la configurazione non corrisponde a quella della CU",
+                    frame,
+            )
+            return
+        }
+
         for ((sensor, metrics) in plan) {
             val record = templateService.getDocument(sensor.modelName)
             val template = templateService.getTemplate(sensor.modelName)
@@ -1091,7 +1127,13 @@ class ControlUnitServiceImpl(
                     try {
                         reportDecoder.decodeSlot(buffer, template, metrics, slotLabel)
                     } catch (e: ReportTruncated) {
-                        discardFrame(c, dto, expectedConfigVersion, e.message ?: "Report troncato")
+                        discardFrame(
+                                c,
+                                dto,
+                                expectedConfigVersion,
+                                e.message ?: "Report troncato",
+                                frame,
+                        )
                         return
                     }
 
@@ -1132,6 +1174,7 @@ class ControlUnitServiceImpl(
                     expectedConfigVersion,
                     "Il report ha ${buffer.remaining()} byte oltre le metriche attese: " +
                             "la configurazione degli slot non corrisponde",
+                    frame,
             )
             return
         }
@@ -1243,15 +1286,31 @@ class ControlUnitServiceImpl(
      * grezzo resta qui, quindi la decisione e' reversibile: quando si scopre perche' non
      * tornava, lo si rilegge.
      */
+    /**
+     * @param frame il frame gia' registrato per questo uplink, se c'e'.
+     *
+     * Il frame si scrive **prima** di leggere le metriche, perche' ogni misura deve poter
+     * puntare alla riga da cui arriva. Se poi la lettura fallisce, quella riga va
+     * **corretta**, non affiancata da una seconda: due voci per lo stesso uplink — una
+     * «Letto» e una «Non decodificabile», allo stesso secondo — raccontano una storia che non
+     * e' successa, e fanno sembrare doppio il traffico.
+     */
     private fun discardFrame(
             cu: ControlUnit,
             dto: CuMeasuresUpdate,
             expected: Int,
             reason: String,
+            frame: UplinkFrame? = null,
     ) {
         cu.decodeFailureCount += 1
         cur.save(cu)
-        saveFrame(cu, dto, expected, FrameStatus.DISCARDED_DECODE_ERROR, reason)
+        if (frame != null) {
+            frame.status = FrameStatus.DISCARDED_DECODE_ERROR
+            frame.failureReason = reason
+            frames.save(frame)
+        } else {
+            saveFrame(cu, dto, expected, FrameStatus.DISCARDED_DECODE_ERROR, reason)
+        }
         log.warn(
                 "Report scartato per DevEUI={}: {} (scartati finora: {})",
                 dto.devEui,

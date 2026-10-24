@@ -37,7 +37,24 @@ class ConfigSnapshotService(
                                 "sensorIndex" to sensor.sensorIndex,
                                 "modelName" to sensor.modelName,
                                 "configurationMeasure" to sensor.configurationMeasure,
-                                "samplingPeriod" to sensor.samplingPeriod,
+                                // L'indice di scala che viaggia davvero sul filo. Stava in
+                                // `samplingPeriod`, che pero' nessuno scrive piu' da quando
+                                // la configurazione passa per `samplingF`: l'istantanea
+                                // registrava zero per tutti.
+                                "samplingPeriod" to sensor.samplingF.toInt(),
+                                /*
+                                 * Se lo slot occupava posto nel report di quella
+                                 * configurazione. Un sensore spento non ne occupa — lo dice
+                                 * lo pseudocodice di decodifica della 0x30, «se il sensore e'
+                                 * attivo (Sampl. T diverso da 0)» — e senza questo campo un
+                                 * report in ritardo verrebbe letto con una mappa degli slot
+                                 * piu' lunga di quella con cui e' stato prodotto.
+                                 *
+                                 * Nelle istantanee scritte prima di questo campo il valore
+                                 * manca: chi legge lo interpreta come «attivo», che e' il
+                                 * comportamento di allora.
+                                 */
+                                "active" to (sensor.samplingF.toInt() != 0),
                         )
                     }
                 }

@@ -4,13 +4,19 @@ import com.polito.tesi.measuremanager.dtos.CuJoinNotification
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.CuStatusUpdate
 import com.polito.tesi.measuremanager.dtos.MuDescriptor
+import com.polito.tesi.measuremanager.dtos.ProcessingCommandDTO
+import com.polito.tesi.measuremanager.dtos.SamplingCommandDTO
+import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
+import com.polito.tesi.measuremanager.dtos.SensorSelectorDTO
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
 import com.polito.tesi.measuremanager.hmac.NetworkIdEncoder
+import com.polito.tesi.measuremanager.kafka.EncodedPayload
 import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
+import com.polito.tesi.measuremanager.uplink.FPort
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
@@ -20,19 +26,25 @@ import com.polito.tesi.measuremanager.repositories.SensorAlarmRepository
 import com.polito.tesi.measuremanager.repositories.UplinkFrameRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
+import com.polito.tesi.measuremanager.entities.DeviceEvent
+import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
+import com.polito.tesi.measuremanager.services.ServerEventRecorder
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.StatusBit
+import com.polito.tesi.measuremanager.sensorconfig.SensorConfigPlanner
 import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.assertThrows
 import org.springframework.data.repository.findByIdOrNull
 
@@ -54,12 +66,29 @@ class ControlUnitServiceTest {
     private val reportDecoder = mockk<ReportDecoder>(relaxed = true)
     private val configSnapshots = mockk<ConfigSnapshotService>(relaxed = true)
     private val alarmRepo = mockk<SensorAlarmRepository>(relaxed = true)
-    private val eventRepo = mockk<DeviceEventRepository>(relaxed = true)
+    /*
+     * Il taccuino degli eventi lo tocca quasi ogni poll, quindi la risposta di `save` serve
+     * ovunque: un simulacro rilassato restituirebbe un Object e il cast al tipo generico
+     * fallirebbe in metodi che con gli eventi non c'entrano niente.
+     */
+    private val eventRepo = mockk<DeviceEventRepository>(relaxed = true).also {
+        every { it.save(any<DeviceEvent>()) } answers { firstArg() }
+    }
     private val encoder = mockk<LorawanPayloadEncoder>()
+
+    /**
+     * Il pianificatore non ha stato e dipende solo dal dizionario: si usa quello vero, cosi'
+     * le prove verificano anche l'espansione dei selettori invece di fidarsi di un simulacro.
+     */
+    private val planner = SensorConfigPlanner(protocol)
+
+    /** Anche il taccuino degli eventi e' quello vero: la regola che conta sta dentro di lui. */
+    private val serverEvents = ServerEventRecorder(eventRepo)
 
     private val service = ControlUnitServiceImpl(
                     cur, mur, mr, sqr, ss, kcu, ts, muModel, protocol, frames, samples,
-                    reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder,
+                    reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder, planner,
+                    serverEvents,
             )
 
     /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
@@ -312,6 +341,9 @@ class ControlUnitServiceTest {
         every { ss.isAdmin() } returns true
         every { cur.findByDevEui(111L) } returns cu
         every { cur.save(any()) } answers { firstArg() }
+        // Il CMD_SEQ lo assegna il database con una istruzione sola: qui si simula il giro.
+        every { cur.bumpCmdSeq(any()) } returns 1
+        every { cur.readCmdSeq(any()) } returns 7
         every { encoder.encodeTransmissionConfig(any(), any()) } returns emptyList()
 
         service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
@@ -513,6 +545,226 @@ class ControlUnitServiceTest {
         // un downlink al minuto.
         service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
         verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
+    }
+
+    // --- TEST: il taccuino degli eventi del server ---
+
+    @Test
+    fun `la topologia cambiata diventa una riga negli eventi`() {
+        val cu = ControlUnit().apply {
+            id = 5
+            devEui = 111L
+            deviceId = "lora-e5"
+            pollingInterval = 1
+        }
+        val cambiata = listOf(
+                StatusBit(bit = 12, kind = "event", meaning = "topology_changed",
+                        description = "Topologia MU cambiata"))
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(null) } returns emptyList()
+        every { protocol.statusFlags(0x1000) } returns cambiata
+        every { encoder.encodeCuConfig(any(), any(), any(), any()) } returns emptyList()
+        every {
+            eventRepo.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+                    5L, EventOrigin.STATUS, 12)
+        } returns emptyList()
+        every { eventRepo.save(any()) } answers { firstArg() }
+
+        service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
+
+        // Il badge e la scheda «Eventi e diagnostica» guardano la stessa riga: prima il
+        // disallineamento viveva come stato corrente e li' non compariva mai.
+        verify(exactly = 1) {
+            eventRepo.save(match<DeviceEvent> {
+                it.origin == EventOrigin.STATUS && it.code == 12
+            })
+        }
+    }
+
+    @Test
+    fun `il disallineamento e' un evento solo, non uno per poll`() {
+        // realign viene chiamata a ogni poll finche' i conti non tornano, cioe' una volta al
+        // minuto: senza la regola dell'evento aperto, la scheda diventerebbe illeggibile in
+        // un'ora.
+        val cu = ControlUnit().apply {
+            id = 5
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 7
+            cmdSeq = 4
+        }
+        val aperto = DeviceEvent(
+                id = 1,
+                controlUnit = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+        )
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.statusFlags(any()) } returns emptyList()
+        every { eventRepo.save(any()) } answers { firstArg() }
+        every {
+            eventRepo.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+                    5L, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
+        } returnsMany listOf(emptyList(), listOf(aperto))
+
+        service.onStatusUpdate(poll(configVersion = 5, appliedCmdSeq = 3))
+        service.onStatusUpdate(poll(configVersion = 5, appliedCmdSeq = 3))
+
+        verify(exactly = 1) { eventRepo.save(any<DeviceEvent>()) }
+    }
+
+    @Test
+    fun `la presa in carico non cancella la riga, la marca`() {
+        val cu = ControlUnit().apply { id = 5; devEui = 111L; deviceId = "lora-e5" }
+        val evento = DeviceEvent(
+                id = 9,
+                controlUnit = cu,
+                origin = EventOrigin.STATUS,
+                code = 12,
+                description = "Topologia MU cambiata",
+        )
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(5L) } returns cu
+        every { eventRepo.findByIdOrNull(9L) } returns evento
+        every { eventRepo.save(any()) } answers { firstArg() }
+
+        val dto = service.acknowledgeEvent(5L, 9L)
+
+        assertTrue(dto.acknowledged, "l'avviso sparisce dagli aperti")
+        assertNotNull(evento.acknowledgedAt, "ma la riga resta, con l'istante in cui e' stata vista")
+    }
+
+    // --- TEST: configurazione dei sensori ---
+
+    /** Una CU con una MU da quattro slot, pronta a ricevere una configurazione. */
+    private fun cuConfigurabile() =
+            ControlUnit().apply {
+                id = 42
+                devEui = 111L
+                deviceId = "cu-0001001"
+                name = "Marco's CU"
+                pollingInterval = 1
+                transmissionInterval = 1
+                measurementUnits = mutableListOf(mu0001(65537L, 1))
+            }
+
+    @Test
+    fun `la configurazione sensori manda un comando per ogni cosa che cambia`() {
+        val cu = cuConfigurabile()
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        // L'allocatore atomico: il numero lo decide il database.
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returnsMany listOf(4, 5)
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1, 2, 3), FPort.PERIODS))
+        every { encoder.encodeStatsAndThresholds(any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(4, 5), FPort.STATS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                sampling =
+                                        listOf(
+                                                SamplingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        periodIndex = 65,
+                                                )
+                                        ),
+                                processing =
+                                        listOf(
+                                                ProcessingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        measure = "mm",
+                                                )
+                                        ),
+                        ),
+                )
+
+        assertEquals(2, esito.commands.size, "periodi sulla 0x21, elaborazione sulla 0x23")
+        assertEquals(listOf(FPort.PERIODS, FPort.STATS), esito.commands.map { it.fPort })
+        assertEquals(listOf(4, 5), esito.commands.map { it.cmdSeq }, "due comandi, due CMD_SEQ distinti")
+        // Il CFG_VER conta i comandi che la CU applichera', non le richieste HTTP.
+        assertEquals(2L, cu.configVersion)
+        verify(exactly = 2) { kcu.sendDownlink("cu-0001001", any()) }
+        // Lo stato desiderato resta scritto anche se la consegna dovesse fallire.
+        assertEquals(65.0, cu.measurementUnits.first().sensors.first().samplingF)
+        assertEquals("max-min", cu.measurementUnits.first().sensors.first().configurationMeasure)
+    }
+
+    @Test
+    fun `una configurazione che non cambia niente non occupa l'aria`() {
+        val cu = cuConfigurabile()
+        cu.measurementUnits.flatMap { it.sensors }.forEach { it.samplingF = 65.0 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                sampling =
+                                        listOf(
+                                                SamplingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        periodIndex = 65,
+                                                )
+                                        )
+                        ),
+                )
+
+        assertTrue(esito.commands.isEmpty())
+        assertEquals(0L, cu.configVersion, "nessun comando, nessun incremento da aspettarsi")
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+        verify(exactly = 0) { cur.bumpCmdSeq(any()) }
+    }
+
+    @Test
+    fun `il CMD_SEQ lo assegna il database, non la copia in memoria`() {
+        // Due richieste parallele leggevano lo stesso numero e lo usavano entrambe: la CU
+        // riconosceva la seconda come ritrasmissione e la scartava. Ora il numero arriva da
+        // un'istruzione sola, e la copia in memoria si limita a seguirlo.
+        val cu = cuConfigurabile()
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returns 200
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1), FPort.PERIODS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        service.applySensorConfig(
+                42L,
+                SensorConfigCommandSetDTO(
+                        sampling =
+                                listOf(
+                                        SamplingCommandDTO(
+                                                SensorSelectorDTO(kind = "broadcast"),
+                                                periodIndex = 65,
+                                        )
+                                )
+                ),
+        )
+
+        assertEquals(200, cu.cmdSeq)
+        verify { encoder.encodePeriods(any(), 200, 1) }
     }
 
     private fun poll(configVersion: Int, appliedCmdSeq: Int? = null, statusRaw: Int = 0) =

@@ -30,6 +30,21 @@ interface DeviceEventRepository : JpaRepository<DeviceEvent, Long> {
 
     fun findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId: Long): List<DeviceEvent>
 
+    /**
+     * Gli eventi ancora aperti di un certo tipo.
+     *
+     * E' la domanda che decide se registrare: un bit di stato resta alzato per ore e il poll
+     * passa ogni minuto, quindi senza questo controllo la stessa topologia cambiata
+     * diventerebbe centinaia di righe. Finche' l'utente non prende in carico quella che c'e',
+     * non se ne scrivono altre; quando l'ha presa in carico e il fatto si ripete, ne nasce
+     * una nuova, ed e' giusto che sia cosi'.
+     */
+    fun findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+            controlUnitId: Long,
+            origin: String,
+            code: Int,
+    ): List<DeviceEvent>
+
     @Modifying
     @Query(
             """

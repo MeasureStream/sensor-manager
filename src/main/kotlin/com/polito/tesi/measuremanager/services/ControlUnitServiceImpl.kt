@@ -2,7 +2,9 @@ package com.polito.tesi.measuremanager.services
 
 import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.entities.ControlUnit
+import com.polito.tesi.measuremanager.entities.EventOrigin
 import com.polito.tesi.measuremanager.entities.Measurement
+import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.entities.SignalQuality
@@ -15,7 +17,11 @@ import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
+import com.polito.tesi.measuremanager.sensorconfig.DesiredSensorState
+import com.polito.tesi.measuremanager.sensorconfig.SensorConfigPlan
+import com.polito.tesi.measuremanager.sensorconfig.SensorConfigPlanner
 import com.polito.tesi.measuremanager.template.MuModelService
+import com.polito.tesi.measuremanager.uplink.FPort
 import com.polito.tesi.measuremanager.entities.FrameStatus
 import com.polito.tesi.measuremanager.entities.UplinkFrame
 import com.polito.tesi.measuremanager.entities.Metric
@@ -30,6 +36,7 @@ import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.ReportTruncated
 import com.polito.tesi.measuremanager.template.StatBitmap
+import com.polito.tesi.measuremanager.template.StatusBit
 import com.polito.tesi.measuremanager.template.TemplateService
 import jakarta.persistence.EntityNotFoundException
 import jakarta.transaction.Transactional
@@ -76,6 +83,8 @@ class ControlUnitServiceImpl(
         private val alarms: SensorAlarmRepository,
         private val deviceEvents: DeviceEventRepository,
         private val encoder: LorawanPayloadEncoder,
+        private val planner: SensorConfigPlanner,
+        private val serverEvents: ServerEventRecorder,
 ) : ControlUnitService {
 
     private val log = LoggerFactory.getLogger(ControlUnitServiceImpl::class.java)
@@ -266,6 +275,10 @@ class ControlUnitServiceImpl(
                 .forEach { kcu.sendDownlink(cu.deviceId, it) }
     }
 
+    // Transazionale perche' assegna un CMD_SEQ e incrementa il CFG_VER: i due contatori
+    // devono muoversi sotto lo stesso lucchetto, altrimenti due configurazioni in parallelo
+    // se li contendono.
+    @Transactional
     override fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO {
         // 1. Controllo permessi (Security)
         if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
@@ -345,6 +358,170 @@ class ControlUnitServiceImpl(
         return safeCommand
     }
 
+    /**
+     * Applica la configurazione dei sensori preparata dalla schermata dedicata.
+     *
+     * E' la via nuova, e sostituisce `sendSensorSamplingUpdate` per tutto cio' che passa
+     * dall'interfaccia: quella riceveva solo i periodi, questa riceve anche le funzioni di
+     * elaborazione e, un giorno, le soglie.
+     *
+     * Tre cose la governano.
+     *
+     * **Si spedisce un comando per ogni cosa che cambia davvero.** I periodi viaggiano sulla
+     * 0x21 e l'elaborazione sulla 0x23: se cambiano solo i periodi parte un comando solo, e se
+     * non cambia niente non parte niente. Rimandare lo stesso valore non e' innocuo — e' un
+     * downlink in coda e un incremento di CFG_VER sulla CU — quindi non si fa.
+     *
+     * **Il CFG_VER cresce di uno per comando applicato, non per richiesta.** Il contatore
+     * conta i comandi che la CU ha applicato: se ne partono due, la CU arrivera' a +2 e il
+     * server deve aspettarsi lo stesso numero. L'istantanea si prende dopo ogni incremento,
+     * perche' e' indicizzata per CFG_VER e un report in ritardo deve trovare la mappa del
+     * momento in cui e' stato prodotto.
+     *
+     * **Lo stato desiderato si scrive prima di spedire.** Se la consegna fallisce resta nel
+     * database cio' che l'utente ha chiesto, e si puo' riprovare; se si scrivesse dopo, un
+     * comando partito e non registrato lascerebbe server e dispositivo di idee diverse senza
+     * che nessuno se ne accorga.
+     */
+    @Transactional
+    override fun applySensorConfig(
+            controlUnitId: Long,
+            command: SensorConfigCommandSetDTO,
+    ): SensorConfigResultDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        checkSameDevice(cu, command)
+
+        val plan = planner.plan(cu, command)
+        val sent = mutableListOf<SentCommandDTO>()
+
+        if (plan.periodsChanged) {
+            // samplingF conserva l'indice di scala: e' il numero che viaggia sul filo.
+            plan.sensors.forEach { it.target.sensor.samplingF = it.periodIndex.toDouble() }
+            sent += sendPeriodsCommand(cu, plan)
+            bumpConfigVersion(cu)
+        }
+
+        val measures = plan.changedMeasures
+        if (measures.isNotEmpty()) {
+            measures.forEach { it.target.sensor.configurationMeasure = it.measure }
+            sent += sendStatsCommand(cu, measures)
+            bumpConfigVersion(cu)
+        }
+
+        val warnings =
+                if (sent.isEmpty()) {
+                    plan.warnings +
+                            "Nessuna modifica da applicare: i valori richiesti erano gia' quelli in opera."
+                } else {
+                    plan.warnings
+                }
+
+        if (sent.isEmpty()) {
+            log.info("CU {}: configurazione sensori senza modifiche, nessun downlink", cu.deviceId)
+        } else {
+            log.info(
+                    "CU {}: configurazione sensori applicata con {} comando/i, CFG_VER atteso {}",
+                    cu.deviceId,
+                    sent.size,
+                    cu.configVersion,
+            )
+        }
+        warnings.forEach { log.warn("CU {}: {}", cu.deviceId, it) }
+
+        return SensorConfigResultDTO(
+                controlUnitId = cu.id,
+                deviceId = cu.deviceId,
+                commands = sent,
+                configVersion = cu.configVersion,
+                cmdSeq = cu.cmdSeq,
+                warnings = warnings,
+        )
+    }
+
+    /**
+     * La pagina puo' essere rimasta aperta su un'altra CU. Il DevEUI dichiarato non seleziona
+     * niente — il dispositivo lo sceglie il percorso della richiesta — ma se non corrisponde
+     * significa che l'utente sta guardando un dispositivo e ne configurerebbe un altro.
+     */
+    private fun checkSameDevice(cu: ControlUnit, command: SensorConfigCommandSetDTO) {
+        val declared = command.devEui?.trim()?.toLongOrNull() ?: return
+        if (declared == cu.devEui) return
+        throw OperationNotAllowed(
+                "La configurazione e' stata preparata per il DevEUI $declared, non per ${cu.deviceId}: ricarica la pagina."
+        )
+    }
+
+    /** Un comando applicato, un CFG_VER, un'istantanea. */
+    private fun bumpConfigVersion(cu: ControlUnit) {
+        cu.configVersion++
+        cur.save(cu)
+        snapshots.take(cu)
+    }
+
+    private fun sendPeriodsCommand(cu: ControlUnit, plan: SensorConfigPlan): SentCommandDTO {
+        val cmdSeq = nextCmdSeq(cu)
+        val payloads = encoder.encodePeriods(periodsCommand(cu, plan), cmdSeq, cu.transmissionInterval)
+        payloads.forEach { kcu.sendDownlink(cu.deviceId, it) }
+
+        return SentCommandDTO(
+                fPort = FPort.PERIODS,
+                cmdSeq = cmdSeq,
+                packets = payloads.size,
+                bytes = payloads.sumOf { it.bytes.size },
+                sensors = plan.sensors.count { it.periodChanged },
+        )
+    }
+
+    /**
+     * La 0x21 elenca il periodo di **tutti** i sensori, non solo di quelli cambiati: e' un
+     * comando di stato pieno. Lo stream lo costruisce il piano, che ha gia' fuso le modifiche
+     * con quello che c'era.
+     */
+    private fun periodsCommand(cu: ControlUnit, plan: SensorConfigPlan): CUConfigurationDTO =
+            CUConfigurationDTO(
+                    devEui = cu.devEui.toString(),
+                    configurations =
+                            plan.sensors.groupBy { it.target.muLocalId }.map { (localId, states) ->
+                                MUConfigCommandDTO(
+                                        localId = localId,
+                                        sensors =
+                                                states.map {
+                                                    SensorConfigDTO(
+                                                            sensorIndex = it.target.sensorIndex,
+                                                            samplingPeriod = it.periodIndex,
+                                                    )
+                                                },
+                                )
+                            },
+            )
+
+    private fun sendStatsCommand(cu: ControlUnit, measures: List<DesiredSensorState>): SentCommandDTO {
+        val cmdSeq = nextCmdSeq(cu)
+        val records =
+                measures.map {
+                    LorawanPayloadEncoder.SensorStatsRecord(
+                            globalIndex = it.target.globalIndex,
+                            statBitmap = StatBitmap.of(it.measure),
+                            // Nessun allarme armato: le soglie non viaggiano finche' manca
+                            // l'inversione della taratura, e un bit alzato senza il suo valore
+                            // farebbe scattare un allarme su una soglia che nessuno ha scelto.
+                            alarmEnable = 0,
+                    )
+                }
+
+        val payloads = encoder.encodeStatsAndThresholds(cmdSeq, records)
+        payloads.forEach { kcu.sendDownlink(cu.deviceId, it) }
+
+        return SentCommandDTO(
+                fPort = FPort.STATS,
+                cmdSeq = cmdSeq,
+                packets = payloads.size,
+                bytes = payloads.sumOf { it.bytes.size },
+                sensors = measures.size,
+        )
+    }
+
+    @Transactional
     override fun sendTransmissionCommand(
             command: CUTransmissionCommandDTO
     ): CUTransmissionCommandDTO {
@@ -494,7 +671,23 @@ class ControlUnitServiceImpl(
         }
 
         cur.save(cu)
-        askMuCheckIfNeeded(cu, previousStatus, c.statusRaw)
+
+        // I bit appena comparsi si calcolano una volta sola: servono a due lettori che
+        // devono vedere lo stesso fronte — il taccuino degli eventi e la richiesta di sanita'.
+        val appeared = appearedFlags(previousStatus, c.statusRaw)
+        serverEvents.recordStatusEvents(cu, appeared)
+        askMuCheckIfNeeded(cu, appeared)
+    }
+
+    /**
+     * I bit che compaiono adesso e prima non c'erano.
+     *
+     * Il confronto e' sui significati e non sui numeri grezzi perche' il dizionario e' la
+     * fonte: se un giorno un bit cambia posizione, qui non cambia niente.
+     */
+    private fun appearedFlags(previous: Int?, current: Int): List<StatusBit> {
+        val before = protocolService.statusFlags(previous).map { it.meaning }.toSet()
+        return protocolService.statusFlags(current).filter { it.meaning !in before }
     }
 
     /**
@@ -506,11 +699,9 @@ class ControlUnitServiceImpl(
      * ha ancora un campo per confermarli. Reagire alla presenza invece che alla comparsa
      * significherebbe un downlink a ogni poll, cioe' uno ogni minuto sulle CU attuali.
      */
-    private fun askMuCheckIfNeeded(cu: ControlUnit, previous: Int?, current: Int) {
+    private fun askMuCheckIfNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
         val triggers = setOf("reset", "topology_changed")
-        val before = protocolService.statusFlags(previous).map { it.meaning }.toSet()
-        val now = protocolService.statusFlags(current).map { it.meaning }.toSet()
-        val appeared = (now - before).intersect(triggers)
+        val appeared = appearedFlags.map { it.meaning }.filter { it in triggers }
         if (appeared.isEmpty()) return
 
         // Senza periodo di poll non si puo' comporre una 0x0A: il comando non parte, ma il
@@ -954,6 +1145,9 @@ class ControlUnitServiceImpl(
             cu.configVersion += (reported - expected) and 0xFF
             cur.save(cu)
             snapshots.take(cu)
+            // I conti tornano: se era aperto un avviso «comando non applicato», si chiude da
+            // solo. Un avviso che resta quando non vale piu' insegna a ignorare gli avvisi.
+            serverEvents.close(cu, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
             log.warn(
                     "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
                     cu.devEui,
@@ -971,6 +1165,18 @@ class ControlUnitServiceImpl(
                 expected,
                 appliedCmdSeq ?: "non dichiarato",
                 cu.cmdSeq,
+        )
+
+        // Finora questo disallineamento viveva solo come confronto fra due numeri: vero
+        // adesso, senza storia, e invisibile nella scheda degli eventi. Diventa una riga, una
+        // sola finche' resta aperta, che l'utente puo' prendere in carico.
+        serverEvents.record(
+                cu = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+                description =
+                        "Configurazione non applicata: la CU dichiara CFG_VER $reported, il server attende $expected " +
+                                "(comando applicato ${appliedCmdSeq ?: "non dichiarato"} contro ${cu.cmdSeq} inviato)",
         )
     }
 
@@ -1104,6 +1310,33 @@ class ControlUnitServiceImpl(
         }
     }
 
+    /**
+     * Presa in carico di un singolo evento: e' la X sul badge.
+     *
+     * Non cancella e non nasconde la storia — la riga resta, con l'istante in cui e' stata
+     * vista. Toglie solo l'avviso dalla vista di «cosa c'e' di aperto adesso», che e' quello
+     * che l'utente chiede quando ha gia' capito e risolto. E se il fatto si ripete, il
+     * taccuino ne scrive uno nuovo.
+     */
+    @Transactional
+    override fun acknowledgeEvent(controlUnitId: Long, eventId: Long): DeviceEventDTO {
+        ownedControlUnit(controlUnitId)
+        val event =
+                deviceEvents.findByIdOrNull(eventId)?.takeIf {
+                    it.controlUnit?.id == controlUnitId
+                }
+                        ?: throw EntityNotFoundException(
+                                "Evento $eventId non trovato sulla Control Unit $controlUnitId"
+                        )
+
+        if (event.acknowledgedAt == null) {
+            event.acknowledgedAt = OffsetDateTime.now()
+            deviceEvents.save(event)
+            log.info("CU {}: evento {} preso in carico", controlUnitId, eventId)
+        }
+        return event.toDTO()
+    }
+
     override fun getFrames(controlUnitId: Long): List<UplinkFrameDTO> {
         ownedControlUnit(controlUnitId)
         return frames.findTop50ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId).map { it.toDTO() }
@@ -1135,10 +1368,22 @@ class ControlUnitServiceImpl(
      * Il numero del prossimo comando di configurazione. Viaggia su un byte nel prologo di
      * blocco e va in wrap a 255: la CU lo confronta per riconoscere una ritrasmissione.
      */
+    /**
+     * Assegna il prossimo CMD_SEQ.
+     *
+     * L'incremento lo fa il database con una sola istruzione (vedi
+     * [ControlUnitRepository.bumpCmdSeq]), non il giro leggi-incrementa-salva che fino al 23
+     * ottobre 2026 permetteva a due richieste parallele di ricevere lo stesso numero. Va
+     * chiamata **dentro una transazione**: il lucchetto preso sulla riga dura fino al commit
+     * e mette in fila anche tutto quello che viene dopo, CFG_VER compreso.
+     */
     private fun nextCmdSeq(cu: ControlUnit): Int {
-        cu.cmdSeq = (cu.cmdSeq + 1) and 0xFF
-        cur.save(cu)
-        return cu.cmdSeq
+        cur.bumpCmdSeq(cu.id)
+        val allocated = cur.readCmdSeq(cu.id)
+        // La copia in memoria si allinea al numero appena scritto: e' lo stesso valore,
+        // quindi il salvataggio dell'entita' non puo' riportarlo indietro.
+        cu.cmdSeq = allocated
+        return allocated
     }
 
     /** La `Stat bitmap` della 0x23. La traduzione sta in [StatBitmap], non qui. */

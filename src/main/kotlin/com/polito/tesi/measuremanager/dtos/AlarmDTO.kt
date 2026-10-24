@@ -26,6 +26,8 @@ data class AlarmDTO(
  */
 data class DeviceEventDTO(
         val id: Long,
+        /** `device` (0xA2), `status` (parola di stato del poll) o `server`. */
+        val origin: String,
         val receivedAt: OffsetDateTime,
         val occurredAt: OffsetDateTime?,
         val ageUncertaintySeconds: Int?,
@@ -56,6 +58,7 @@ fun SensorAlarm.toDTO() =
 fun DeviceEvent.toDTO() =
         DeviceEventDTO(
                 id = id,
+                origin = origin,
                 receivedAt = receivedAt,
                 occurredAt = occurredAt,
                 ageUncertaintySeconds = ageUncertaintySeconds,

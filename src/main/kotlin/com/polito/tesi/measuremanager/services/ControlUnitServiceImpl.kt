@@ -392,6 +392,8 @@ class ControlUnitServiceImpl(
         checkSameDevice(cu, command)
 
         val plan = planner.plan(cu, command)
+        requireTransmissionPeriod(cu, plan)
+
         val sent = mutableListOf<SentCommandDTO>()
 
         if (plan.periodsChanged) {
@@ -435,6 +437,31 @@ class ControlUnitServiceImpl(
                 configVersion = cu.configVersion,
                 cmdSeq = cu.cmdSeq,
                 warnings = warnings,
+        )
+    }
+
+    /**
+     * Senza un periodo di trasmissione la 0x21 non si manda.
+     *
+     * Il comando dei periodi trasporta il `CU Trans. T` nel blocco 0, come valore assoluto e
+     * non come «lascia com'e'»: sulla scala di trasmissione lo **zero e' OFF**. Spedirla
+     * mentre il server non conosce un periodo significherebbe dire alla CU di campionare e
+     * poi tacere — una configurazione che si spegne da sola, e nessuno che se ne accorga
+     * finche' non mancano i dati.
+     *
+     * E' la stessa trappola del ΔT_Polling nella 0x0A, con una differenza: li' il valore
+     * inventato e' una scorciatoia dichiarata, qui inventarlo vorrebbe dire scegliere ogni
+     * quanto un dispositivo occupa l'etere. Quindi si rifiuta, e si dice cosa fare.
+     *
+     * Il blocco vale solo quando i periodi cambiano davvero: configurare le sole funzioni di
+     * elaborazione non passa dalla 0x21 e non ha motivo di essere fermato.
+     */
+    private fun requireTransmissionPeriod(cu: ControlUnit, plan: SensorConfigPlan) {
+        if (!plan.periodsChanged || cu.transmissionInterval > 0) return
+        throw OperationNotAllowed(
+                "Periodo di trasmissione non configurato per ${cu.deviceId}: il comando dei periodi lo " +
+                        "trasporta nel primo blocco e il valore 0 vale «non trasmettere». Imposta prima " +
+                        "l'intervallo di trasmissione, poi riprova."
         )
     }
 

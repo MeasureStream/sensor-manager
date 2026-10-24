@@ -734,6 +734,69 @@ class ControlUnitServiceTest {
     }
 
     @Test
+    fun `senza periodo di trasmissione la 0x21 non parte`() {
+        // Il CU Trans. T viaggia nel blocco 0 come valore assoluto, e zero vale OFF: mandarla
+        // direbbe al dispositivo di campionare e poi tacere. Meglio rifiutare e dirlo.
+        val cu = cuConfigurabile().apply { transmissionInterval = 0 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+
+        assertThrows<OperationNotAllowed> {
+            service.applySensorConfig(
+                    42L,
+                    SensorConfigCommandSetDTO(
+                            sampling =
+                                    listOf(
+                                            SamplingCommandDTO(
+                                                    SensorSelectorDTO(kind = "broadcast"),
+                                                    periodIndex = 65,
+                                            )
+                                    )
+                    ),
+            )
+        }
+
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+        verify(exactly = 0) { cur.bumpCmdSeq(any()) }
+    }
+
+    @Test
+    fun `senza periodo di trasmissione le sole funzioni si configurano lo stesso`() {
+        // La 0x23 non porta il periodo di trasmissione: non c'e' motivo di fermarla.
+        val cu = cuConfigurabile().apply { transmissionInterval = 0 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returns 8
+        every { encoder.encodeStatsAndThresholds(any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1), FPort.STATS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                processing =
+                                        listOf(
+                                                ProcessingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        measure = "mm",
+                                                )
+                                        )
+                        ),
+                )
+
+        assertEquals(listOf(FPort.STATS), esito.commands.map { it.fPort })
+    }
+
+    @Test
     fun `il CMD_SEQ lo assegna il database, non la copia in memoria`() {
         // Due richieste parallele leggevano lo stesso numero e lo usavano entrambe: la CU
         // riconosceva la seconda come ritrasmissione e la scartava. Ora il numero arriva da

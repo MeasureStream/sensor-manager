@@ -15,13 +15,13 @@ object FPort {
     /** Dummy: un byte che serve solo ad aprire una finestra di ricezione. */
     const val DUMMY = 0x02
 
-    /** Stato della CU nel formato precedente alla v1.2: 5 byte, senza CFG_VER. */
+    /** Stato della CU prima della v1.2: 5 byte, senza CFG_VER. **Dismessa**, non si legge piu'. */
     const val CU_STATUS_LEGACY = 0x0A
 
-    /** Poll. Nove byte nella v1.2; sette nel formato precedente, che portava TEMPLATE_VER. */
+    /** Poll: dieci byte, solo nel formato v1.2. */
     const val POLL = 0x0B
 
-    /** Notifica delle MU connesse, deprecata: 4 byte per MU, senza versione del modello. */
+    /** Notifica delle MU connesse a 4 byte, senza il MAJOR. **Dismessa**. */
     const val TOPOLOGY_LEGACY = 0x10
 
     /** Notifica delle MU connesse, versioned: 5 byte per MU, con il MAJOR del modello. */
@@ -33,7 +33,7 @@ object FPort {
     /** Report dati: CFG_VER, CONTENT, FRAG e le metriche concatenate. */
     const val REPORT = 0x30
 
-    /** Report nel formato precedente: solo CFG_VER e le metriche. */
+    /** Report prima della v1.2: solo CFG_VER e le metriche, senza CONTENT ne' FRAG. **Dismessa**. */
     const val REPORT_LEGACY = 0x21
 
     /**

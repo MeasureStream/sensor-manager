@@ -92,6 +92,17 @@ class ControlUnit {
     var configVersion: Long = 0
 
     /**
+     * Se dopo un riavvio con CFG_VER 0, e a topologia delle MU invariata, il server rimanda la
+     * configurazione che conserva.
+     *
+     * E' una proprieta' del dispositivo e non una preferenza di chi guarda la pagina: chi
+     * decide che quel nodo si riconfigura da solo lo decide per tutti. Predefinito a falso,
+     * perche' rimandare un comando occupa l'etere e riscrive il comportamento di una CU senza
+     * che nessuno l'abbia chiesto in quel momento.
+     */
+    var autoRestoreConfig: Boolean = false
+
+    /**
      * Report scartati perche' la CU dichiarava un CFG_VER diverso da quello atteso.
      * Si azzera al primo report allineato: e' il segno che il guasto e' rientrato.
      */

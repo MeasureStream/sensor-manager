@@ -20,6 +20,12 @@ object ServerEventCode {
      * atteso e un CMD_SEQ che non e' quello spedito. Si chiude da solo quando i conti tornano.
      */
     const val CONFIG_NOT_APPLIED = 1
+
+    /** La configurazione e' stata rimandata da sola dopo un riavvio del dispositivo. */
+    const val CONFIG_RESTORED = 2
+
+    /** Il ripristino automatico non e' stato fatto: la mappa delle MU non e' piu' la stessa. */
+    const val RESTORE_SKIPPED = 3
 }
 
 /**

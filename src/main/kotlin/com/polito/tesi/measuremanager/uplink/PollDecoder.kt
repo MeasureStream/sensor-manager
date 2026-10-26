@@ -22,8 +22,6 @@ data class PollMessage(
         val appliedCmdSeq: Int? = null,
         /** ProtoVer: 0x12 per il protocollo v1.2. Assente nei formati precedenti. */
         val protocolVer: Int? = null,
-        /** TEMPLATE_VER del vecchio poll a 7 byte, sostituito da ProtoVer nella v1.2. */
-        val templateVersion: Int? = null,
         val batteryRaw: Int,
         val batteryLevel: Int,
         val acPowered: Boolean,
@@ -39,15 +37,16 @@ data class PollMessage(
 class PollPayloadError(message: String) : Exception(message)
 
 /**
- * Il poll, nei formati che possono arrivare.
+ * Il poll della v1.2, e nient'altro.
  *
- * La porta 0x0B e' condivisa dal poll della v1.2 e da quello che lo precedeva: si distinguono
- * dalla lunghezza, che e' il criterio che la documentazione indica. La 0x0A resta finche'
- * esiste una CU non aggiornata.
+ * I formati precedenti sono stati dismessi il 26 ottobre 2026, quando ogni CU in campo ha
+ * dichiarato `ProtoVer` 0x12: il poll a sette byte con TEMPLATE_VER, lo stato a cinque byte
+ * sulla 0x0A e la revisione intermedia a nove byte non si leggono piu'.
  *
- * La revisione intermedia a nove byte — v1.2 prima che `CMD_SEQ` entrasse — non e' piu'
- * accettata: e' vissuta pochi giorni fra il server e il simulatore, e tenerla in vita
- * costringeva a convivere con un'ambiguita' di lunghezza che non si poteva sciogliere.
+ * Non e' solo pulizia. Finche' due formati convivono sulla stessa porta e si distinguono
+ * dalla lunghezza, un payload troncato cade sul ramo corto e viene letto come se fosse valido:
+ * i campi scalano di posizione e il risultato e' plausibile. Con un formato solo, un poll
+ * malformato e' un errore dichiarato.
  */
 @Component
 class PollDecoder(
@@ -57,15 +56,12 @@ class PollDecoder(
     fun decode(bytes: ByteArray, fport: Int): PollMessage {
         val buffer = ByteBuffer.wrap(bytes)
 
-        return when {
-            fport == FPort.CU_STATUS_LEGACY -> decodeLegacyStatus(buffer, bytes.size)
-            bytes.size >= 10 -> decodeV12(buffer)
-            bytes.size >= 7 -> decodeLegacyPoll(buffer)
-            else ->
-                    throw PollPayloadError(
-                            "${FPort.label(fport)}: ${bytes.size} byte, ne servono almeno 7"
-                    )
+        if (bytes.size < 10) {
+            throw PollPayloadError(
+                    "${FPort.label(fport)}: ${bytes.size} byte, il poll v1.2 ne ha almeno 10"
+            )
         }
+        return decodeV12(buffer)
     }
 
     /**
@@ -94,37 +90,6 @@ class PollDecoder(
                         statusWord = status,
                         alarmSeq = alarmSeq,
                 )
-    }
-
-    /** Poll precedente alla v1.2: sette byte, con TEMPLATE_VER al posto di ProtoVer. */
-    private fun decodeLegacyPoll(buffer: ByteBuffer): PollMessage {
-        val model = buffer.short.toInt() and 0xFFFF
-        val cfgVersion = buffer.get().toInt() and 0xFF
-        val templateVersion = buffer.get().toInt() and 0xFF
-        val batteryRaw = buffer.get().toInt() and 0xFF
-        val ptx = buffer.get().toInt() and 0xFF
-        val status = if (buffer.remaining() >= 1) (buffer.get().toInt() and 0xFF).toLong() else 0L
-
-        return battery(batteryRaw)
-                .copy(
-                        model = model,
-                        cfgVersion = cfgVersion,
-                        templateVersion = templateVersion,
-                        transmissionPower = ptx,
-                        statusWord = status,
-                )
-    }
-
-    /** Stato sulla 0x0A: cinque byte, senza nessuna versione. */
-    private fun decodeLegacyStatus(buffer: ByteBuffer, size: Int): PollMessage {
-        if (size < 4) throw PollPayloadError("${FPort.label(FPort.CU_STATUS_LEGACY)}: $size byte")
-        val model = buffer.short.toInt() and 0xFFFF
-        val batteryRaw = buffer.get().toInt() and 0xFF
-        val ptx = buffer.get().toInt() and 0xFF
-        val status = if (buffer.remaining() >= 1) (buffer.get().toInt() and 0xFF).toLong() else 0L
-
-        return battery(batteryRaw)
-                .copy(model = model, transmissionPower = ptx, statusWord = status)
     }
 
     /**

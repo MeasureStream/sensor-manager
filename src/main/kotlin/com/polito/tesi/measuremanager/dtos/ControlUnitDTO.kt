@@ -77,6 +77,8 @@ data class ControlUnitDTO(
      * il byte basso, ed e' su quello che si confrontano i report.
      */
     val configVersion: Long,
+    /** Se il server rimanda la configurazione dopo un riavvio del dispositivo. */
+    val autoRestoreConfig: Boolean,
     /**
      * Report scartati perche' la CU dichiarava un CFG_VER diverso: > 0 significa che si
      * stanno perdendo misure e che serve un riallineamento della configurazione o un reset.
@@ -148,6 +150,7 @@ fun ControlUnit.toDTO(
     lastAirtime = lastAirtime,
     transmissionInterval = transmissionInterval,
     configVersion = configVersion,
+    autoRestoreConfig = autoRestoreConfig,
     configMismatchCount = configMismatchCount,
     decodeFailureCount = decodeFailureCount,
     lastReportedConfigVersion = lastReportedConfigVersion,

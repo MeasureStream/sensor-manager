@@ -132,6 +132,18 @@ class ControlUnitController(
         return cs.applySensorConfig(id, command)
     }
 
+    /**
+     * Accende o spegne il ripristino automatico per questa CU.
+     *
+     * E' una proprieta' del dispositivo, non una preferenza di chi guarda la pagina: chi
+     * decide che quel nodo si riconfigura da solo lo decide per tutti quelli che lo useranno.
+     */
+    @PostMapping("/{id}/auto-restore")
+    fun setAutoRestore(@PathVariable id: Long, @RequestParam enabled: Boolean): ControlUnitDTO {
+        log.info("Control Unit {}: ripristino automatico impostato a {}", id, enabled)
+        return cs.setAutoRestoreConfig(id, enabled)
+    }
+
     @PostMapping("/polling", "/polling/")
     fun configureCU(@RequestBody command: CUConfigCommandDTO) {
         log.info("Ricevuto comando POLLING per EUI: {}", command.devEui)

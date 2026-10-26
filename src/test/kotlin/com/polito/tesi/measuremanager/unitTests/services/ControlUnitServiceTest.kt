@@ -9,6 +9,7 @@ import com.polito.tesi.measuremanager.dtos.ProcessingCommandDTO
 import com.polito.tesi.measuremanager.dtos.SamplingCommandDTO
 import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
 import com.polito.tesi.measuremanager.dtos.SensorSelectorDTO
+import com.polito.tesi.measuremanager.entities.ConfigSnapshot
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.UplinkFrame
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
@@ -553,6 +554,145 @@ class ControlUnitServiceTest {
         service.onStatusUpdate(poll(configVersion = 0, statusRaw = 0x1000))
         verify(exactly = 1) { encoder.encodeCuConfig(any(), any(), any(), 1) }
     }
+
+    // --- TEST: ripristino automatico dopo un riavvio ---
+
+    @Test
+    fun `dopo un riavvio la configurazione si rimanda, se l'interruttore e' acceso`() {
+        val cu = cuConfigurabile().apply {
+            configVersion = 9
+            autoRestoreConfig = true
+            // L'ultimo poll diceva: non ho configurazione.
+            lastReportedConfigVersion = 0
+        }
+        cu.measurementUnits.flatMap { it.sensors }.forEachIndexed { i, s ->
+            s.id = (i + 1).toLong()
+            s.samplingF = if (s.sensorIndex == 0) 0.0 else 47.0
+        }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { mur.save(any()) } answers { firstArg() }
+        // Le MU ci sono gia': la 0x11 dopo il riavvio le ritrova, non le crea. L'elenco si
+        // cattura adesso perche' onJoinNotification lo svuota prima di ricostruirlo.
+        val muDiPartenza = cu.measurementUnits.toList()
+        every { mur.findByExtendedId(any()) } answers {
+            val id = firstArg<Long>()
+            muDiPartenza.find { it.extendedId == id }
+        }
+        every { muModel.materialize(any()) } returns false
+        every { protocol.dictionary(any()) } returns null
+        every { cur.bumpCmdSeq(any()) } returns 1
+        every { cur.readCmdSeq(any()) } returnsMany listOf(21, 22)
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1), FPort.PERIODS))
+        every { encoder.encodeStatsAndThresholds(any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(2), FPort.STATS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+        // L'istantanea della configurazione corrente cita gli stessi sensori di adesso.
+        every { configSnapshots.forWireVersion(42L, 9) } returns
+                snapshotConGliStessiSensori(cu)
+
+        // La topologia conferma le MU: e' li' che la condizione diventa verificabile.
+        service.onJoinNotification(topologia(cu))
+
+        verify(exactly = 2) { kcu.sendDownlink("cu-0001001", any()) }
+        assertEquals(11L, cu.configVersion, "due comandi rimandati, due incrementi attesi")
+    }
+
+    @Test
+    fun `con l'interruttore spento non si rimanda niente`() {
+        val cu = cuConfigurabile().apply {
+            configVersion = 9
+            autoRestoreConfig = false
+            lastReportedConfigVersion = 0
+        }
+        cu.measurementUnits.flatMap { it.sensors }.forEach { it.samplingF = 47.0 }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { mur.save(any()) } answers { firstArg() }
+        // Le MU ci sono gia': la 0x11 dopo il riavvio le ritrova, non le crea. L'elenco si
+        // cattura adesso perche' onJoinNotification lo svuota prima di ricostruirlo.
+        val muDiPartenza = cu.measurementUnits.toList()
+        every { mur.findByExtendedId(any()) } answers {
+            val id = firstArg<Long>()
+            muDiPartenza.find { it.extendedId == id }
+        }
+        every { muModel.materialize(any()) } returns false
+
+        service.onJoinNotification(topologia(cu))
+
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+    }
+
+    @Test
+    fun `se la mappa delle MU e' cambiata il ripristino non si fa`() {
+        // Due MU dello stesso modello hanno la stessa forma ma non sono lo stesso
+        // dispositivo: rimandare la configurazione di prima vorrebbe dire configurare
+        // sensori diversi da quelli che l'utente aveva scelto.
+        val cu = cuConfigurabile().apply {
+            configVersion = 9
+            autoRestoreConfig = true
+            lastReportedConfigVersion = 0
+        }
+        cu.measurementUnits.flatMap { it.sensors }.forEachIndexed { i, s ->
+            s.id = (i + 1).toLong()
+            s.samplingF = 47.0
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { mur.save(any()) } answers { firstArg() }
+        // Le MU ci sono gia': la 0x11 dopo il riavvio le ritrova, non le crea. L'elenco si
+        // cattura adesso perche' onJoinNotification lo svuota prima di ricostruirlo.
+        val muDiPartenza = cu.measurementUnits.toList()
+        every { mur.findByExtendedId(any()) } answers {
+            val id = firstArg<Long>()
+            muDiPartenza.find { it.extendedId == id }
+        }
+        every { muModel.materialize(any()) } returns false
+        every { protocol.dictionary(any()) } returns null
+        // L'istantanea cita sensori che adesso non ci sono piu'.
+        every { configSnapshots.forWireVersion(42L, 9) } returns
+                ConfigSnapshot(
+                        controlUnit = cu,
+                        cfgVersion = 9,
+                        content = mapOf("slots" to listOf(mapOf("sensorId" to 99))),
+                )
+
+        service.onJoinNotification(topologia(cu))
+
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+    }
+
+    /** L'istantanea che cita esattamente i sensori che la CU ha adesso. */
+    private fun snapshotConGliStessiSensori(cu: ControlUnit) =
+            ConfigSnapshot(
+                    controlUnit = cu,
+                    cfgVersion = cu.configVersion,
+                    content =
+                            mapOf(
+                                    "slots" to
+                                            cu.measurementUnits.sortedBy { it.localId }.flatMap { mu ->
+                                                mu.sensors.sortedBy { it.sensorIndex }.map {
+                                                    mapOf("sensorId" to it.id)
+                                                }
+                                            }
+                            ),
+            )
+
+    /** La notifica di topologia con le MU che la CU ha gia'. */
+    private fun topologia(cu: ControlUnit) =
+            CuJoinNotification(
+                    devEui = 111L,
+                    deviceId = cu.deviceId,
+                    muList =
+                            cu.measurementUnits.map {
+                                MuDescriptor(it.extendedId ?: 0L, it.localId, it.model, it.modelMajor)
+                            },
+            )
 
     // --- TEST: lettura del report ---
 

@@ -60,6 +60,12 @@ interface ControlUnitService {
     fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO
 
     /**
+     * Accende o spegne il ripristino automatico della configurazione per questa CU.
+     * Lo stato si conserva sul dispositivo, non sulla sessione di chi guarda.
+     */
+    fun setAutoRestoreConfig(controlUnitId: Long, enabled: Boolean): ControlUnitDTO
+
+    /**
      * La configurazione dei sensori come la prepara la schermata dedicata: periodi e funzioni
      * di elaborazione insieme, raggruppati per valore. Restituisce cosa e' partito davvero.
      */

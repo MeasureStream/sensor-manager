@@ -5,12 +5,14 @@ import com.polito.tesi.measuremanager.uplink.FPort
 import com.polito.tesi.measuremanager.uplink.MuStatusDecoder
 import com.polito.tesi.measuremanager.uplink.MuStatusPayloadError
 import com.polito.tesi.measuremanager.uplink.PollDecoder
+import com.polito.tesi.measuremanager.uplink.PollPayloadError
 import com.polito.tesi.measuremanager.uplink.TopologyDecoder
 import com.polito.tesi.measuremanager.uplink.TopologyPayloadError
 import io.mockk.every
 import io.mockk.mockk
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.assertThrows
@@ -54,7 +56,6 @@ class UplinkDecodersTest {
         assertEquals(14, message.transmissionPower)
         assertEquals(0x21L, message.statusWord)
         assertEquals(5, message.alarmSeq)
-        assertNull(message.templateVersion, "il campo TEMPLATE_VER non esiste piu'")
     }
 
     @Test
@@ -70,24 +71,18 @@ class UplinkDecodersTest {
     }
 
     @Test
-    fun `poll precedente - sette byte, con TEMPLATE_VER`() {
-        val message = poll.decode(bytes("00 01 03 01 4B 0E 00"), FPort.POLL)
-
-        assertEquals(0x0001, message.model)
-        assertEquals(3, message.cfgVersion)
-        assertEquals(1, message.templateVersion)
-        assertNull(message.protocolVer, "senza ProtoVer la CU non dichiara la v1.2")
-        assertNull(message.alarmSeq)
-        assertEquals(75, message.batteryLevel)
+    fun `il poll a sette byte non si legge piu'`() {
+        // Finche' due formati convivevano sulla stessa porta e si distinguevano dalla
+        // lunghezza, un poll troncato cadeva sul ramo corto e veniva letto come valido: i
+        // campi scalavano di posizione e il risultato era plausibile. Adesso e' un errore.
+        assertFailsWith<PollPayloadError> { poll.decode(bytes("00 01 03 01 4B 0E 00"), FPort.POLL) }
     }
 
     @Test
-    fun `stato sulla porta precedente - cinque byte`() {
-        val message = poll.decode(bytes("00 01 64 0E 00"), FPort.CU_STATUS_LEGACY)
-
-        assertEquals(0x0001, message.model)
-        assertEquals(100, message.batteryLevel)
-        assertNull(message.cfgVersion, "la 0x0A non porta il CFG_VER")
+    fun `lo stato a cinque byte sulla 0x0A non si legge piu'`() {
+        assertFailsWith<PollPayloadError> {
+            poll.decode(bytes("00 01 64 0E 00"), FPort.CU_STATUS_LEGACY)
+        }
     }
 
     @Test
@@ -119,11 +114,12 @@ class UplinkDecodersTest {
     }
 
     @Test
-    fun `notifica 0x10 - quattro byte per MU, nessuna versione`() {
-        val entries = topology.decode(bytes("00 01 00 01 00 03 00 07"), FPort.TOPOLOGY_LEGACY)
-
-        assertEquals(2, entries.size)
-        assertNull(entries[0].modelMajor, "la 0x10 non porta la versione del modello")
+    fun `la notifica a quattro byte per MU non si legge piu'`() {
+        // Otto byte: due record nel formato 0x10, nessuno in quello a cinque. Senza il MAJOR
+        // il server sceglieva la versione piu' alta pubblicata e la applicava a tutte le MU.
+        assertFailsWith<TopologyPayloadError> {
+            topology.decode(bytes("00 01 00 01 00 03 00 07"), FPort.TOPOLOGY_LEGACY)
+        }
     }
 
     @Test

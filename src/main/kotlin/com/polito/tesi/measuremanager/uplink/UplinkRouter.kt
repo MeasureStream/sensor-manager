@@ -24,8 +24,10 @@ import org.springframework.stereotype.Service
  * qui e che qui si aggiornano nella stessa transazione. Prima erano divise fra due servizi, e
  * un formato nuovo obbligava a rilasciarli entrambi.
  *
- * Le porte del formato precedente restano accese: si spengono quando ogni CU in campo
- * dichiara la ProtoVer 1.2 nel poll, non un minuto prima.
+ * Le porte del formato precedente sono state dismesse il 26 ottobre 2026, quando ogni CU in
+ * campo ha dichiarato la ProtoVer 1.2 nel poll. Non spariscono in silenzio: arrivarci sopra
+ * lascia un frame registrato con il motivo, perche' un dispositivo rimasto indietro va visto,
+ * non ignorato.
  */
 @Service
 class UplinkRouter(
@@ -38,6 +40,17 @@ class UplinkRouter(
         private val assembler: ReportAssembler,
 ) {
     private val log = LoggerFactory.getLogger(UplinkRouter::class.java)
+
+    private companion object {
+        /** Le porte che il server non legge piu'. Restano nominate per poterle riconoscere. */
+        val DISMESSE =
+                setOf(
+                        FPort.CU_STATUS_LEGACY,
+                        FPort.TOPOLOGY_LEGACY,
+                        FPort.REPORT_LEGACY,
+                        FPort.REPORT_LEGACY_EXTRA,
+                )
+    }
 
     fun accept(uplink: LoraUplink) {
         val bytes =
@@ -54,25 +67,16 @@ class UplinkRouter(
 
         try {
             when (uplink.fport) {
-                FPort.POLL, FPort.CU_STATUS_LEGACY -> poll(uplink, bytes)
-                FPort.TOPOLOGY, FPort.TOPOLOGY_LEGACY -> topology(uplink, bytes)
+                FPort.POLL -> poll(uplink, bytes)
+                FPort.TOPOLOGY -> topology(uplink, bytes)
                 FPort.MU_STATUS -> muStatus(uplink, bytes)
                 FPort.REPORT -> report(uplink, bytes)
-                FPort.REPORT_LEGACY -> legacyReport(uplink, bytes)
                 FPort.ALARMS -> alarmService.onAlarms(uplink)
                 FPort.EVENTS -> alarmService.onEvents(uplink)
                 // Un byte che serve solo ad aprire una finestra di ricezione: non c'e' niente
                 // da leggere, e riceverlo e' gia' l'informazione.
                 FPort.DUMMY -> log.debug("DevEUI={}: dummy", uplink.devEui)
-                FPort.REPORT_LEGACY_EXTRA ->
-                        cus.recordUndecodableFrame(
-                                devEui = uplink.devEui,
-                                fport = uplink.fport,
-                                rawPayload = uplink.rawPayload,
-                                reason =
-                                        "Porta 0x31 dismessa: le metriche extra viaggiano nel CONTENT della 0x30",
-                                timestamp = uplink.timestamp,
-                        )
+                in DISMESSE -> dismissed(uplink)
                 else ->
                         log.warn(
                                 "DevEUI={}: nessun decoder per la porta {}",
@@ -96,6 +100,27 @@ class UplinkRouter(
         // fallita: e' arrivato qualcosa da quella CU, ed e' tutto cio' che significa. Dopo
         // l'instradamento, cosi' una CU appena censita dal poll esiste gia'.
         cus.touch(uplink.devEui, uplink.timestamp)
+    }
+
+    /* -------------------------------------------------- porte dismesse */
+
+    /**
+     * Una porta del formato precedente.
+     *
+     * Si registra come frame illeggibile invece di finire in un log: se un dispositivo e'
+     * rimasto indietro lo si deve poter vedere dalla scheda della CU, con il grezzo accanto,
+     * e non scoprirlo perche' mancano le misure.
+     */
+    private fun dismissed(uplink: LoraUplink) {
+        cus.recordUndecodableFrame(
+                devEui = uplink.devEui,
+                fport = uplink.fport,
+                rawPayload = uplink.rawPayload,
+                reason =
+                        "Porta ${FPort.label(uplink.fport)} dismessa con la v1.2: " +
+                                "il dispositivo parla ancora il formato precedente",
+                timestamp = uplink.timestamp,
+        )
     }
 
     /* ------------------------------------------------------------- poll */
@@ -179,27 +204,6 @@ class UplinkRouter(
                     )
             )
         }
-    }
-
-    /** Report nel formato precedente: un byte di CFG_VER e via, senza CONTENT ne' FRAG. */
-    private fun legacyReport(uplink: LoraUplink, bytes: ByteArray) {
-        if (bytes.isEmpty()) {
-            log.warn("DevEUI={}: report 0x21 vuoto", uplink.devEui)
-            return
-        }
-        cus.onMeasuresUpdate(
-                CuMeasuresUpdate(
-                        devEui = uplink.devEui,
-                        deviceId = uplink.deviceId,
-                        configVersion = bytes[0].toInt() and 0xFF,
-                        rawPayload =
-                                Base64.getEncoder().encodeToString(bytes.copyOfRange(1, bytes.size)),
-                        timestamp = uplink.timestamp,
-                        content = null,
-                        fragments = 1,
-                        fport = FPort.REPORT_LEGACY,
-                )
-        )
     }
 
     /**

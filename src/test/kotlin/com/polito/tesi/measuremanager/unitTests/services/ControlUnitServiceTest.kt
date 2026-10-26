@@ -694,6 +694,70 @@ class ControlUnitServiceTest {
                             },
             )
 
+    @Test
+    fun `un report con il CFG_VER vecchio fa ripartire la configurazione, una volta sola`() {
+        /*
+         * Il report porta il CFG_VER della configurazione con cui e' stato prodotto: se e'
+         * vecchio, il comando non e' entrato in opera. Arriva a ogni periodo di trasmissione,
+         * quindi e' il segnale piu' tempestivo — ma proprio per questo il ripristino deve
+         * scattare una volta per episodio e non a ogni report, o sarebbe un downlink ogni
+         * quindici secondi. Il limite e' l'evento aperto nel taccuino.
+         */
+        val cu = cuConfigurabile().apply {
+            configVersion = 9
+            autoRestoreConfig = true
+        }
+        cu.measurementUnits.flatMap { it.sensors }.forEachIndexed { i, s ->
+            s.id = (i + 1).toLong()
+            s.samplingF = 47.0
+        }
+        val aperto = DeviceEvent(
+                id = 1,
+                controlUnit = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+        )
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+        every { ts.getTemplate(any()) } returns null
+        every { cur.bumpCmdSeq(any()) } returns 1
+        every { cur.readCmdSeq(any()) } returnsMany listOf(21, 22, 23, 24)
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1), FPort.PERIODS))
+        every { encoder.encodeStatsAndThresholds(any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(2), FPort.STATS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+        // Della versione 7 non c'e' istantanea: il report si scarta. Delle altre si', e serve
+        // a verificare che la mappa delle MU sia rimasta la stessa.
+        every { configSnapshots.forWireVersion(42L, any()) } answers {
+            if (secondArg<Int>() == 7) null else snapshotConGliStessiSensori(cu)
+        }
+        // La prima volta non c'e' nessun episodio aperto; dalla seconda si'.
+        every {
+            eventRepo.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(
+                    42L, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
+        } returnsMany listOf(emptyList(), listOf(aperto))
+
+        service.onMeasuresUpdate(reportConCfgVer(7))
+        service.onMeasuresUpdate(reportConCfgVer(7))
+
+        // Due downlink in tutto: la 0x21 e la 0x23 del primo ripristino, non del secondo.
+        verify(exactly = 2) { kcu.sendDownlink("cu-0001001", any()) }
+    }
+
+    private fun reportConCfgVer(cfgVersion: Int) =
+            CuMeasuresUpdate(
+                    devEui = 111L,
+                    deviceId = "cu-0001001",
+                    configVersion = cfgVersion,
+                    rawPayload = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0, 1, 0, 2)),
+                    timestamp = null,
+                    content = 0x01,
+            )
+
     // --- TEST: lettura del report ---
 
     @Test

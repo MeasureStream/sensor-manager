@@ -506,19 +506,39 @@ class ControlUnitServiceImpl(
      *    scelto.
      */
     private fun restoreConfigIfNeeded(cu: ControlUnit) {
-        if (!cu.autoRestoreConfig) return
         if (cu.lastReportedConfigVersion != 0) return
+
+        // Si agisce una volta sola su questa dichiarazione: al prossimo poll la CU dira' un
+        // CFG_VER nuovo e la condizione tornera' vera solo dopo un altro riavvio.
+        if (resendConfiguration(cu, "dopo il riavvio del dispositivo")) {
+            cu.lastReportedConfigVersion = null
+        }
+    }
+
+    /**
+     * Rimanda la configurazione che il server conserva, se si puo'.
+     *
+     * Ci si arriva da due segnali diversi e la strada e' una sola: il riavvio dichiarato
+     * (CFG_VER 0 dopo la notifica di topologia) e il report che porta un CFG_VER vecchio.
+     * Il secondo e' il piu' tempestivo dei due — arriva a ogni periodo di trasmissione invece
+     * che a ogni poll — ed e' una prova altrettanto buona: se il dispositivo sta ancora
+     * misurando con la configurazione di prima, il comando non e' entrato in opera.
+     *
+     * @return vero se qualcosa e' davvero partito.
+     */
+    private fun resendConfiguration(cu: ControlUnit, motivo: String): Boolean {
+        if (!cu.autoRestoreConfig) return false
 
         val plan = planner.plan(cu, SensorConfigCommandSetDTO())
         val attivi = plan.sensors.filter { it.target.sensor.samplingF.toInt() != SAMPLING_OFF }
-        if (attivi.isEmpty()) return
+        if (attivi.isEmpty()) return false
 
         if (cu.transmissionInterval <= 0) {
             log.warn(
                     "CU {}: ripristino non eseguito, manca il periodo di trasmissione (la 0x21 lo porta come valore assoluto)",
                     cu.deviceId,
             )
-            return
+            return false
         }
 
         if (!topologyMatchesSnapshot(cu)) {
@@ -531,15 +551,11 @@ class ControlUnitServiceImpl(
                     origin = EventOrigin.SERVER,
                     code = ServerEventCode.RESTORE_SKIPPED,
                     description =
-                            "Ripristino automatico non eseguito: dopo il riavvio la mappa delle MU e' diversa " +
-                                    "da quella della configurazione conservata. Va riconfigurata a mano.",
+                            "Ripristino automatico non eseguito ($motivo): la mappa delle MU e' diversa da " +
+                                    "quella della configurazione conservata. Va riconfigurata a mano.",
             )
-            return
+            return false
         }
-
-        // Si agisce una volta sola su questa dichiarazione: al prossimo poll la CU dira' un
-        // CFG_VER nuovo e la condizione tornera' a essere vera solo dopo un altro riavvio.
-        cu.lastReportedConfigVersion = null
 
         sendPeriodsCommand(cu, plan)
         bumpConfigVersion(cu)
@@ -547,8 +563,9 @@ class ControlUnitServiceImpl(
         bumpConfigVersion(cu)
 
         log.info(
-                "CU {}: configurazione rimandata dopo il riavvio ({} sensori attivi), CFG_VER atteso {}",
+                "CU {}: configurazione rimandata {} ({} sensori attivi), CFG_VER atteso {}",
                 cu.deviceId,
+                motivo,
                 attivi.size,
                 cu.configVersion,
         )
@@ -557,9 +574,46 @@ class ControlUnitServiceImpl(
                 origin = EventOrigin.SERVER,
                 code = ServerEventCode.CONFIG_RESTORED,
                 description =
-                        "Configurazione rimandata dopo il riavvio del dispositivo: ${attivi.size} sensori, " +
-                                "periodi e funzioni di elaborazione.",
+                        "Configurazione rimandata $motivo: ${attivi.size} sensori, periodi e funzioni " +
+                                "di elaborazione.",
         )
+        return true
+    }
+
+    /**
+     * Il server si accorge che la CU non ha la configurazione che dovrebbe avere.
+     *
+     * Ci arrivano due segnali: il poll, che dichiara un CFG_VER diverso da quello atteso con
+     * un CMD_SEQ che non e' quello inviato, e il **report**, che porta il CFG_VER della
+     * configurazione con cui e' stato davvero prodotto. Il secondo arriva molto piu' spesso —
+     * a ogni periodo di trasmissione invece che a ogni poll — e fino a oggi il server lo usava
+     * soltanto per scegliere con quale istantanea leggere i byte: per sopravvivere al
+     * disallineamento, non per chiuderlo.
+     *
+     * La reazione avviene **una volta per episodio**, e il limite non e' un contatore nuovo:
+     * e' l'evento aperto. Il taccuino ne tiene uno solo per tipo, quindi finche' quello c'e'
+     * non si rimanda niente; quando i conti tornano, [realign] lo chiude e il server e' di
+     * nuovo pronto a reagire. Senza questo vincolo, un report ogni quindici secondi
+     * diventerebbe un downlink ogni quindici secondi.
+     */
+    private fun onConfigDivergence(
+            cu: ControlUnit,
+            reported: Int,
+            expected: Int,
+            appliedCmdSeq: Int?,
+    ) {
+        serverEvents.record(
+                cu = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_NOT_APPLIED,
+                description =
+                        "Configurazione non applicata: la CU dichiara CFG_VER $reported, il server attende " +
+                                "$expected (comando applicato ${appliedCmdSeq ?: "non dichiarato"} contro " +
+                                "${cu.cmdSeq} inviato)",
+        )
+                ?: return
+
+        resendConfiguration(cu, "perche' la CU misurava ancora con il CFG_VER $reported")
     }
 
     /**
@@ -1062,6 +1116,19 @@ class ControlUnitServiceImpl(
                         snapshots.forWireVersion(c.id, dto.configVersion)
                 else null
 
+        /*
+         * Un report con un CFG_VER vecchio e' la prova piu' tempestiva che il comando non e'
+         * entrato in opera: il dispositivo sta ancora misurando con la configurazione di
+         * prima, e lo dice a ogni periodo di trasmissione invece che a ogni poll.
+         *
+         * Fino a oggi il server usava questo numero solo per scegliere con quale istantanea
+         * leggere i byte — per sopravvivere al disallineamento, non per chiuderlo. Adesso
+         * apre l'episodio, e se il ripristino automatico e' acceso lo chiude da solo.
+         */
+        if (dto.configVersion != expectedConfigVersion) {
+            onConfigDivergence(c, dto.configVersion, expectedConfigVersion, c.appliedCmdSeq)
+        }
+
         if (dto.configVersion != expectedConfigVersion && snapshot == null) {
             // Il report resta scartato: senza sapere quale configurazione era attiva, quei byte
             // non sono decodificabili nemmeno in seguito. Ma non sparisce in silenzio: il
@@ -1351,15 +1418,8 @@ class ControlUnitServiceImpl(
 
         // Finora questo disallineamento viveva solo come confronto fra due numeri: vero
         // adesso, senza storia, e invisibile nella scheda degli eventi. Diventa una riga, una
-        // sola finche' resta aperta, che l'utente puo' prendere in carico.
-        serverEvents.record(
-                cu = cu,
-                origin = EventOrigin.SERVER,
-                code = ServerEventCode.CONFIG_NOT_APPLIED,
-                description =
-                        "Configurazione non applicata: la CU dichiara CFG_VER $reported, il server attende $expected " +
-                                "(comando applicato ${appliedCmdSeq ?: "non dichiarato"} contro ${cu.cmdSeq} inviato)",
-        )
+        // sola finche' resta aperta, e puo' far scattare il ripristino.
+        onConfigDivergence(cu, reported, expected, appliedCmdSeq)
     }
 
     /**

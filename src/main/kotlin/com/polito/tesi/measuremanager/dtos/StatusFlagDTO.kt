@@ -17,6 +17,8 @@ data class StatusFlagDTO(
         val kind: String?,
         /** Per lo stato di una MU: `mu` se il bit arriva dal bus UART, `cu` se lo aggiunge la CU. */
         val origin: String?,
+        /** `info` per il funzionamento normale, `warning` per cio' che va guardato. */
+        val severity: String? = null,
 )
 
 fun StatusBit.toDTO() =
@@ -26,4 +28,5 @@ fun StatusBit.toDTO() =
                 description = description,
                 kind = kind,
                 origin = origin,
+                severity = severity,
         )

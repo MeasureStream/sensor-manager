@@ -77,6 +77,12 @@ data class StatusBit(
         val bit: Int = 0,
         val kind: String? = null,
         val origin: String? = null,
+        /**
+         * `info` se il bit descrive il funzionamento normale, `warning` se descrive un
+         * problema. Serve a decidere cosa mostrare e di che colore, senza che l'interfaccia
+         * conosca i significati uno per uno.
+         */
+        val severity: String? = null,
         val meaning: String = "",
         val description: String = "",
 )

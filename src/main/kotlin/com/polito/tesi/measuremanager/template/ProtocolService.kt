@@ -111,8 +111,21 @@ class ProtocolService(
     fun statusFlags(word: Int?): List<StatusBit> = flags(word, dictionary()?.statusBits.orEmpty())
 
     /** I bit alzati nella parola di stato di una MU. */
+    /**
+     * I tre bit che descrivono il funzionamento normale di una MU. Servono come rete di
+     * sicurezza quando il dizionario non dichiara la gravita': tutto il resto, se e' alzato,
+     * e' qualcosa che qualcuno dovrebbe guardare.
+     */
+    private val MU_NORMALI = setOf("online", "sampling", "calibrating")
+
     fun muStatusFlags(word: Int?): List<StatusBit> =
             flags(word, dictionary()?.muStatusBits.orEmpty())
+                    .map {
+                        // Il dizionario e' la fonte; questa e' la rete di sicurezza per i
+                        // documenti pubblicati prima che il campo esistesse.
+                        if (it.severity != null) it
+                        else it.copy(severity = if (it.meaning in MU_NORMALI) "info" else "warning")
+                    }
 
     /**
      * Un bit alzato che il dizionario non descrive non sparisce: compare come «non

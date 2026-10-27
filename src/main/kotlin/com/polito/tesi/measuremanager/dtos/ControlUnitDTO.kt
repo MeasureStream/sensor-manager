@@ -77,6 +77,15 @@ data class ControlUnitDTO(
      * il byte basso, ed e' su quello che si confrontano i report.
      */
     val configVersion: Long,
+    /**
+     * Il CFG_VER **come viaggia sul filo**: un byte, cioe' il contatore assoluto modulo 256.
+     *
+     * I due numeri divergono perche' quando il server adotta il valore del dispositivo somma
+     * sempre in avanti — da 5 a 1 aggiunge 252, non sottrae 4 — e dopo qualche adozione il
+     * contatore assoluto e' nell'ordine delle centinaia. E' corretto, ma confrontarlo con
+     * quello che la CU dichiara non ha senso: il confronto si fa su questo.
+     */
+    val configVersionOnWire: Int,
     /** Se il server rimanda la configurazione dopo un riavvio del dispositivo. */
     val autoRestoreConfig: Boolean,
     /**
@@ -150,6 +159,7 @@ fun ControlUnit.toDTO(
     lastAirtime = lastAirtime,
     transmissionInterval = transmissionInterval,
     configVersion = configVersion,
+    configVersionOnWire = (configVersion and 0xFF).toInt(),
     autoRestoreConfig = autoRestoreConfig,
     configMismatchCount = configMismatchCount,
     decodeFailureCount = decodeFailureCount,

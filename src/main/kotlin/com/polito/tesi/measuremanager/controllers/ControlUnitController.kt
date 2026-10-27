@@ -117,6 +117,32 @@ class ControlUnitController(
      * applicato. Un endpoint che risponde sempre di si' toglie a chi configura l'unico indizio
      * che aveva.
      */
+    /**
+     * Chiede alla CU di risincronizzare l'orologio (Command1 bit 4).
+     *
+     * Il comando non trasporta l'ora: quella il dispositivo la ottiene da TTN con
+     * `DeviceTimeReq`, che e' un comando MAC e non passa di qui. Questo e' l'ordine di
+     * andarla a chiedere, e serve quando il bit di sincronizzazione scaduta e' alzato da
+     * prima e quindi non produce nessun fronte.
+     */
+    @PostMapping("/{id}/time-sync")
+    fun requestTimeSync(@PathVariable id: Long): ControlUnitDTO {
+        log.info("Ri-sincronizzazione del tempo richiesta per la Control Unit {}", id)
+        return cs.requestTimeSync(id)
+    }
+
+    /**
+     * Rimanda la configurazione corrente, identica, senza che nulla sia cambiato.
+     *
+     * Serve dopo un riavvio del dispositivo, quando si vuole rimetterlo in pari senza
+     * passare dal cambiare un valore e rimetterlo com'era.
+     */
+    @PostMapping("/{id}/sensor-config/resend")
+    fun resendSensorConfig(@PathVariable id: Long): SensorConfigResultDTO {
+        log.info("Reinvio della configurazione corrente per la Control Unit {}", id)
+        return cs.resendSensorConfig(id)
+    }
+
     @PostMapping("/{id}/sensor-config")
     fun applySensorConfig(
             @PathVariable id: Long,

@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.services
 import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.EventSeverity
 import com.polito.tesi.measuremanager.entities.Measurement
 import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
@@ -63,6 +64,14 @@ private const val COMMAND1_MU_CHECK = 0x01
  * progetto: la configurazione di un dispositivo andrebbe decisa, non inventata dal server.
  * Sta in `STATO_LAVORI.md` fra le scorciatoie da togliere.
  */
+/**
+ * Bit 4 di `Command1`: dice alla CU di risincronizzare l'orologio.
+ *
+ * Non porta l'ora — quella la ottiene il dispositivo da TTN con `DeviceTimeReq`, che e' un
+ * comando MAC e non passa dal livello applicativo — porta l'ordine di andarla a chiedere.
+ */
+private const val COMMAND1_TIME_SYNC = 0x10
+
 private const val DEFAULT_POLLING_HOURS = 1
 
 /**
@@ -472,6 +481,68 @@ class ControlUnitServiceImpl(
         )
     }
 
+    /**
+     * Rimanda la configurazione che c'e', identica, perche' qualcuno l'ha chiesto.
+     *
+     * E' il gemello manuale del ripristino automatico, e ne differisce in due punti che
+     * contano: non guarda l'interruttore, perche' l'ordine arriva da una persona; e non
+     * verifica che la mappa delle MU sia la stessa, perche' il comando si compone dallo
+     * **stato desiderato di adesso**, che e' gia' riferito ai sensori che la CU ha oggi.
+     *
+     * Serve quando il dispositivo e' ripartito e si vuole rimetterlo in pari senza passare
+     * dal cambiare un valore e rimetterlo com'era, che e' il modo in cui si fa quando non
+     * c'e' un pulsante.
+     */
+    @Transactional
+    override fun resendSensorConfig(controlUnitId: Long): SensorConfigResultDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        val plan = planner.plan(cu, SensorConfigCommandSetDTO())
+
+        if (cu.transmissionInterval <= 0) {
+            throw OperationNotAllowed(
+                    "Periodo di trasmissione non configurato per ${cu.deviceId}: il comando dei periodi lo " +
+                            "trasporta nel primo blocco e il valore 0 vale «non trasmettere». Imposta prima " +
+                            "l'intervallo di trasmissione, poi riprova."
+            )
+        }
+
+        val sent = mutableListOf<SentCommandDTO>()
+        sent += sendPeriodsCommand(cu, plan)
+        bumpConfigVersion(cu)
+
+        // Le funzioni di elaborazione si rimandano solo per i sensori accesi: per gli altri
+        // non c'e' niente da calcolare, e un record in meno e' un record che non occupa aria.
+        val attivi = plan.sensors.filter { it.target.sensor.samplingF.toInt() != SAMPLING_OFF }
+        if (attivi.isNotEmpty()) {
+            sent += sendStatsCommand(cu, attivi)
+            bumpConfigVersion(cu)
+        }
+
+        log.info(
+                "CU {}: configurazione rimandata su richiesta ({} comandi, {} sensori accesi)",
+                cu.deviceId,
+                sent.size,
+                attivi.size,
+        )
+        serverEvents.record(
+                cu = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_RESTORED,
+                description =
+                        "Configurazione rimandata su richiesta: ${attivi.size} sensori accesi, periodi e " +
+                                "funzioni di elaborazione.",
+                severity = EventSeverity.INFO,
+        )
+
+        return SensorConfigResultDTO(
+                controlUnitId = cu.id,
+                deviceId = cu.deviceId,
+                commands = sent,
+                configVersion = cu.configVersion,
+                cmdSeq = cu.cmdSeq,
+        )
+    }
+
     /** L'interruttore del ripristino automatico, per questa CU. */
     @Transactional
     override fun setAutoRestoreConfig(controlUnitId: Long, enabled: Boolean): ControlUnitDTO {
@@ -576,6 +647,7 @@ class ControlUnitServiceImpl(
                 description =
                         "Configurazione rimandata $motivo: ${attivi.size} sensori, periodi e funzioni " +
                                 "di elaborazione.",
+                severity = EventSeverity.INFO,
         )
         return true
     }
@@ -876,7 +948,7 @@ class ControlUnitServiceImpl(
         // devono vedere lo stesso fronte — il taccuino degli eventi e la richiesta di sanita'.
         val appeared = appearedFlags(previousStatus, c.statusRaw)
         serverEvents.recordStatusEvents(cu, appeared)
-        askMuCheckIfNeeded(cu, appeared)
+        askWhatIsNeeded(cu, appeared)
     }
 
     /**
@@ -899,10 +971,32 @@ class ControlUnitServiceImpl(
      * ha ancora un campo per confermarli. Reagire alla presenza invece che alla comparsa
      * significherebbe un downlink a ogni poll, cioe' uno ogni minuto sulle CU attuali.
      */
-    private fun askMuCheckIfNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
-        val triggers = setOf("reset", "topology_changed")
-        val appeared = appearedFlags.map { it.meaning }.filter { it in triggers }
-        if (appeared.isEmpty()) return
+    private fun askWhatIsNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
+        val comparsi = appearedFlags.map { it.meaning }.toSet()
+        var command1 = 0
+        val richieste = mutableListOf<String>()
+
+        if (comparsi.any { it in setOf("reset", "topology_changed") }) {
+            command1 = command1 or COMMAND1_MU_CHECK
+            richieste += "controllo di sanita' delle MU"
+        }
+
+        /*
+         * La sincronizzazione del tempo **non** e' qui, ed e' una scelta.
+         *
+         * L'ora viaggia come comando MAC fra dispositivo e network server (DeviceTimeReq /
+         * DeviceTimeAns): la CU e' l'unica che sa di averla vecchia, l'unica che puo'
+         * chiederla, e a rispondere e' TTN. Il server non aggiunge niente a quel giro, in
+         * compenso ci metterebbe un downlink e una finestra di ricezione per dire al
+         * dispositivo una cosa che sa gia'. Peggio: una CU con l'orologio scaduto resterebbe
+         * scaduta finche' il server non glielo dice, e se il server e' fermo non si
+         * risincronizza mai.
+         *
+         * Il bit 11 dello Status resta, con l'altro significato: **informa** il server che i
+         * tempi di quel dispositivo non sono affidabili. Non e' una richiesta di aiuto.
+         */
+        if (command1 == 0) return
+        val appeared = richieste
 
         // Senza periodo di poll non si puo' comporre una 0x0A: il comando non parte, ma il
         // motivo va detto, perche' altrimenti la topologia resta disallineata in silenzio.
@@ -915,12 +1009,25 @@ class ControlUnitServiceImpl(
             return
         }
 
-        sendCuConfig(cu, command1 = COMMAND1_MU_CHECK)
-        log.info(
-                "CU devEUI={}: {} -> chiesto il controllo di sanita' delle MU",
-                cu.devEui,
-                appeared.joinToString(),
-        )
+        sendCuConfig(cu, command1 = command1)
+        log.info("CU devEUI={}: chiesto {}", cu.devEui, appeared.joinToString(" e "))
+    }
+
+    /**
+     * Chiede alla CU di risincronizzare l'orologio.
+     *
+     * **E' una leva da banco, non un meccanismo.** Un firmware fatto bene si accorge da solo
+     * che l'ora e' scaduta e manda un `DeviceTimeReq`, senza che nessuno glielo dica: il
+     * server non ha niente da aggiungere a quello scambio, perche' non e' lui a rispondere.
+     * Questo comando serve finche' il firmware non lo fa, e per provare la catena durante la
+     * messa in opera.
+     */
+    @Transactional
+    override fun requestTimeSync(controlUnitId: Long): ControlUnitDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        sendCuConfig(cu, command1 = COMMAND1_TIME_SYNC)
+        log.info("CU {}: chiesta la ri-sincronizzazione del tempo", cu.deviceId)
+        return cu.toDTO(templateService, protocolService)
     }
 
     /**
@@ -1397,7 +1504,31 @@ class ControlUnitServiceImpl(
             // I conti tornano: se era aperto un avviso «comando non applicato», si chiude da
             // solo. Un avviso che resta quando non vale piu' insegna a ignorare gli avvisi.
             serverEvents.close(cu, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
-            log.warn(
+
+            /*
+             * E con lui se ne va l'avviso dei report scartati. Finora quei contatori si
+             * azzeravano solo all'arrivo di un report allineato — fino a un periodo di
+             * trasmissione dopo — quindi la scheda continuava a dire «configurazione
+             * disallineata» quando il disallineamento era gia' rientrato.
+             */
+            cu.configMismatchCount = 0
+            cu.lastConfigMismatchAt = null
+            cu.lastReportedConfigVersion = null
+            cur.save(cu)
+
+            // Un riallineamento e' un fatto, non un problema: si registra come gli altri, ma
+            // in chiaro, perche' mostrarlo del colore degli avvisi insegna a ignorarli.
+            serverEvents.record(
+                    cu = cu,
+                    origin = EventOrigin.SERVER,
+                    code = ServerEventCode.CONFIG_REALIGNED,
+                    description =
+                            "Configurazione riallineata: il server attendeva CFG_VER $expected, la CU " +
+                                    "dichiara $reported e il comando $appliedCmdSeq risulta applicato.",
+                    severity = EventSeverity.INFO,
+            )
+
+            log.info(
                     "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
                     cu.devEui,
                     reported,

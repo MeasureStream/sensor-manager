@@ -481,6 +481,68 @@ class ControlUnitServiceImpl(
         )
     }
 
+    /**
+     * Rimanda la configurazione che c'e', identica, perche' qualcuno l'ha chiesto.
+     *
+     * E' il gemello manuale del ripristino automatico, e ne differisce in due punti che
+     * contano: non guarda l'interruttore, perche' l'ordine arriva da una persona; e non
+     * verifica che la mappa delle MU sia la stessa, perche' il comando si compone dallo
+     * **stato desiderato di adesso**, che e' gia' riferito ai sensori che la CU ha oggi.
+     *
+     * Serve quando il dispositivo e' ripartito e si vuole rimetterlo in pari senza passare
+     * dal cambiare un valore e rimetterlo com'era, che e' il modo in cui si fa quando non
+     * c'e' un pulsante.
+     */
+    @Transactional
+    override fun resendSensorConfig(controlUnitId: Long): SensorConfigResultDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        val plan = planner.plan(cu, SensorConfigCommandSetDTO())
+
+        if (cu.transmissionInterval <= 0) {
+            throw OperationNotAllowed(
+                    "Periodo di trasmissione non configurato per ${cu.deviceId}: il comando dei periodi lo " +
+                            "trasporta nel primo blocco e il valore 0 vale «non trasmettere». Imposta prima " +
+                            "l'intervallo di trasmissione, poi riprova."
+            )
+        }
+
+        val sent = mutableListOf<SentCommandDTO>()
+        sent += sendPeriodsCommand(cu, plan)
+        bumpConfigVersion(cu)
+
+        // Le funzioni di elaborazione si rimandano solo per i sensori accesi: per gli altri
+        // non c'e' niente da calcolare, e un record in meno e' un record che non occupa aria.
+        val attivi = plan.sensors.filter { it.target.sensor.samplingF.toInt() != SAMPLING_OFF }
+        if (attivi.isNotEmpty()) {
+            sent += sendStatsCommand(cu, attivi)
+            bumpConfigVersion(cu)
+        }
+
+        log.info(
+                "CU {}: configurazione rimandata su richiesta ({} comandi, {} sensori accesi)",
+                cu.deviceId,
+                sent.size,
+                attivi.size,
+        )
+        serverEvents.record(
+                cu = cu,
+                origin = EventOrigin.SERVER,
+                code = ServerEventCode.CONFIG_RESTORED,
+                description =
+                        "Configurazione rimandata su richiesta: ${attivi.size} sensori accesi, periodi e " +
+                                "funzioni di elaborazione.",
+                severity = EventSeverity.INFO,
+        )
+
+        return SensorConfigResultDTO(
+                controlUnitId = cu.id,
+                deviceId = cu.deviceId,
+                commands = sent,
+                configVersion = cu.configVersion,
+                cmdSeq = cu.cmdSeq,
+        )
+    }
+
     /** L'interruttore del ripristino automatico, per questa CU. */
     @Transactional
     override fun setAutoRestoreConfig(controlUnitId: Long, enabled: Boolean): ControlUnitDTO {
@@ -920,18 +982,19 @@ class ControlUnitServiceImpl(
         }
 
         /*
-         * Sincronizzazione del tempo scaduta.
+         * La sincronizzazione del tempo **non** e' qui, ed e' una scelta.
          *
-         * Il bit 4 di Command1 non trasporta l'ora e non potrebbe: l'ora viaggia come
-         * comando MAC fra dispositivo e network server (DeviceTimeReq / DeviceTimeAns), un
-         * colloquio in cui il livello applicativo non entra. Quel bit dice alla CU di andare
-         * a chiederla.
+         * L'ora viaggia come comando MAC fra dispositivo e network server (DeviceTimeReq /
+         * DeviceTimeAns): la CU e' l'unica che sa di averla vecchia, l'unica che puo'
+         * chiederla, e a rispondere e' TTN. Il server non aggiunge niente a quel giro, in
+         * compenso ci metterebbe un downlink e una finestra di ricezione per dire al
+         * dispositivo una cosa che sa gia'. Peggio: una CU con l'orologio scaduto resterebbe
+         * scaduta finche' il server non glielo dice, e se il server e' fermo non si
+         * risincronizza mai.
+         *
+         * Il bit 11 dello Status resta, con l'altro significato: **informa** il server che i
+         * tempi di quel dispositivo non sono affidabili. Non e' una richiesta di aiuto.
          */
-        if ("time_sync_expired" in comparsi) {
-            command1 = command1 or COMMAND1_TIME_SYNC
-            richieste += "ri-sincronizzazione del tempo"
-        }
-
         if (command1 == 0) return
         val appeared = richieste
 
@@ -951,11 +1014,13 @@ class ControlUnitServiceImpl(
     }
 
     /**
-     * Chiede alla CU di risincronizzare l'orologio, a mano.
+     * Chiede alla CU di risincronizzare l'orologio.
      *
-     * La richiesta automatica scatta sul **fronte** del bit 11, cioe' quando la
-     * sincronizzazione scade; se il bit e' alzato da prima non c'e' nessun fronte da vedere,
-     * e questo e' il modo per forzarla.
+     * **E' una leva da banco, non un meccanismo.** Un firmware fatto bene si accorge da solo
+     * che l'ora e' scaduta e manda un `DeviceTimeReq`, senza che nessuno glielo dica: il
+     * server non ha niente da aggiungere a quello scambio, perche' non e' lui a rispondere.
+     * Questo comando serve finche' il firmware non lo fa, e per provare la catena durante la
+     * messa in opera.
      */
     @Transactional
     override fun requestTimeSync(controlUnitId: Long): ControlUnitDTO {

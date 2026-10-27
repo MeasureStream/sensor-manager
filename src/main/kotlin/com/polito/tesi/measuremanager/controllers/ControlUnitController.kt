@@ -131,6 +131,18 @@ class ControlUnitController(
         return cs.requestTimeSync(id)
     }
 
+    /**
+     * Rimanda la configurazione corrente, identica, senza che nulla sia cambiato.
+     *
+     * Serve dopo un riavvio del dispositivo, quando si vuole rimetterlo in pari senza
+     * passare dal cambiare un valore e rimetterlo com'era.
+     */
+    @PostMapping("/{id}/sensor-config/resend")
+    fun resendSensorConfig(@PathVariable id: Long): SensorConfigResultDTO {
+        log.info("Reinvio della configurazione corrente per la Control Unit {}", id)
+        return cs.resendSensorConfig(id)
+    }
+
     @PostMapping("/{id}/sensor-config")
     fun applySensorConfig(
             @PathVariable id: Long,

@@ -28,6 +28,8 @@ data class DeviceEventDTO(
         val id: Long,
         /** `device` (0xA2), `status` (parola di stato del poll) o `server`. */
         val origin: String,
+        /** `info` oppure `warning`: quanto pesa, non che cosa e'. */
+        val severity: String,
         val receivedAt: OffsetDateTime,
         val occurredAt: OffsetDateTime?,
         val ageUncertaintySeconds: Int?,
@@ -59,6 +61,7 @@ fun DeviceEvent.toDTO() =
         DeviceEventDTO(
                 id = id,
                 origin = origin,
+                severity = severity,
                 receivedAt = receivedAt,
                 occurredAt = occurredAt,
                 ageUncertaintySeconds = ageUncertaintySeconds,

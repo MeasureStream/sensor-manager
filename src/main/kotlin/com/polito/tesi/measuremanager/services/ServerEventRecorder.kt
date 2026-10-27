@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.services
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.DeviceEvent
 import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.EventSeverity
 import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
 import com.polito.tesi.measuremanager.template.StatusBit
 import java.time.OffsetDateTime
@@ -59,7 +60,13 @@ class ServerEventRecorder(private val events: DeviceEventRepository) {
      *
      * @return la riga creata, oppure null se ce n'era gia' una aperta.
      */
-    fun record(cu: ControlUnit, origin: String, code: Int, description: String): DeviceEvent? {
+    fun record(
+            cu: ControlUnit,
+            origin: String,
+            code: Int,
+            description: String,
+            severity: String = EventSeverity.WARNING,
+    ): DeviceEvent? {
         val already =
                 events.findByControlUnit_IdAndOriginAndCodeAndAcknowledgedAtIsNull(cu.id, origin, code)
         if (already.isNotEmpty()) return null
@@ -70,6 +77,7 @@ class ServerEventRecorder(private val events: DeviceEventRepository) {
                                 controlUnit = cu,
                                 receivedAt = OffsetDateTime.now(),
                                 origin = origin,
+                                severity = severity,
                                 // Un evento della CU: nessuna MU, nessun canale.
                                 source = 0,
                                 sensorIndex = 0xFF,

@@ -31,6 +31,7 @@ import com.polito.tesi.measuremanager.repositories.SignalQualityRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.entities.DeviceEvent
 import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.EventSeverity
 import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.services.ControlUnitServiceImpl
 import com.polito.tesi.measuremanager.services.ServerEventRecorder
@@ -46,9 +47,11 @@ import com.polito.tesi.measuremanager.template.TemplateService
 import io.mockk.*
 import jakarta.persistence.EntityNotFoundException
 import java.nio.ByteBuffer
+import java.time.OffsetDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.assertThrows
 import org.springframework.data.repository.findByIdOrNull
@@ -370,6 +373,9 @@ class ControlUnitServiceTest {
             deviceId = "lora-e5"
             configVersion = 0
             cmdSeq = 3
+            // Prima del rientro c'erano report scartati: l'avviso arancione era acceso.
+            configMismatchCount = 7
+            lastConfigMismatchAt = OffsetDateTime.now()
         }
 
         every { cur.findByDevEui(111L) } returns cu
@@ -378,9 +384,21 @@ class ControlUnitServiceTest {
         service.onStatusUpdate(poll(configVersion = 2, appliedCmdSeq = 3))
 
         assertEquals(2, cu.configVersion, "il server adotta il numero dichiarato dalla CU")
-        assertEquals(2, cu.lastReportedConfigVersion)
         assertEquals(3, cu.appliedCmdSeq)
         verify(exactly = 1) { configSnapshots.take(cu) }
+
+        // Il disallineamento e' rientrato adesso, non al prossimo report: l'avviso dei
+        // report scartati deve spegnersi subito, o la scheda continua a dire una cosa falsa.
+        assertEquals(0L, cu.configMismatchCount)
+        assertNull(cu.lastConfigMismatchAt)
+        assertNull(cu.lastReportedConfigVersion, "non c'e' piu' nessun disallineamento da ricordare")
+
+        // E il rientro si racconta, in chiaro: e' una buona notizia, non un avviso.
+        verify {
+            eventRepo.save(match<DeviceEvent> {
+                it.code == ServerEventCode.CONFIG_REALIGNED && it.severity == EventSeverity.INFO
+            })
+        }
     }
 
     @Test

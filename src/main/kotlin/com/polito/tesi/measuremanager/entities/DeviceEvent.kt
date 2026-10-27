@@ -13,6 +13,21 @@ object EventOrigin {
     const val SERVER = "server"
 }
 
+/**
+ * Quanto pesa un evento.
+ *
+ * Non tutto cio' che il server registra e' un problema: una configurazione tornata in passo
+ * e' un fatto, e merita di essere raccontata senza il colore dell'allarme. L'interfaccia
+ * sceglie da qui, senza conoscere i codici.
+ */
+object EventSeverity {
+    /** E' accaduto, ed e' andato bene. */
+    const val INFO = "info"
+
+    /** Richiede attenzione. */
+    const val WARNING = "warning"
+}
+
 /** I codici degli eventi che il server osserva da se'. Piccolo elenco, per scelta. */
 object ServerEventCode {
     /**
@@ -26,6 +41,9 @@ object ServerEventCode {
 
     /** Il ripristino automatico non e' stato fatto: la mappa delle MU non e' piu' la stessa. */
     const val RESTORE_SKIPPED = 3
+
+    /** I conti tornano: il server ha adottato il CFG_VER del dispositivo. */
+    const val CONFIG_REALIGNED = 4
 }
 
 /**
@@ -51,6 +69,8 @@ class DeviceEvent(
         var receivedAt: OffsetDateTime = OffsetDateTime.now(),
         /** Uno fra i valori di [EventOrigin]: separa anche gli spazi dei codici. */
         @Column(nullable = false) var origin: String = EventOrigin.DEVICE,
+        /** Uno fra i valori di [EventSeverity]: decide il colore, non il significato. */
+        @Column(nullable = false) var severity: String = EventSeverity.WARNING,
         @Column(name = "event_seq") var eventSeq: Int? = null,
         /** Local ID della MU che ha generato l'evento; 0 indica la CU stessa. */
         @Column(nullable = false) var source: Int = 0,

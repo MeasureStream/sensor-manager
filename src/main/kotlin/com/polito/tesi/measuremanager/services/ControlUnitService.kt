@@ -42,6 +42,9 @@ interface ControlUnitService {
      */
     fun requestMuCheck(controlUnitId: Long): ControlUnitDTO
 
+    /** Chiede alla CU di risincronizzare l'orologio: Command1 bit 4. */
+    fun requestTimeSync(controlUnitId: Long): ControlUnitDTO
+
     fun onJoinNotification(c: CuJoinNotification)
 
     fun onStatusUpdate(c: CuStatusUpdate)

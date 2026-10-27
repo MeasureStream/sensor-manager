@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.services
 import com.polito.tesi.measuremanager.dtos.*
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.EventOrigin
+import com.polito.tesi.measuremanager.entities.EventSeverity
 import com.polito.tesi.measuremanager.entities.Measurement
 import com.polito.tesi.measuremanager.entities.ServerEventCode
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
@@ -63,6 +64,14 @@ private const val COMMAND1_MU_CHECK = 0x01
  * progetto: la configurazione di un dispositivo andrebbe decisa, non inventata dal server.
  * Sta in `STATO_LAVORI.md` fra le scorciatoie da togliere.
  */
+/**
+ * Bit 4 di `Command1`: dice alla CU di risincronizzare l'orologio.
+ *
+ * Non porta l'ora — quella la ottiene il dispositivo da TTN con `DeviceTimeReq`, che e' un
+ * comando MAC e non passa dal livello applicativo — porta l'ordine di andarla a chiedere.
+ */
+private const val COMMAND1_TIME_SYNC = 0x10
+
 private const val DEFAULT_POLLING_HOURS = 1
 
 /**
@@ -576,6 +585,7 @@ class ControlUnitServiceImpl(
                 description =
                         "Configurazione rimandata $motivo: ${attivi.size} sensori, periodi e funzioni " +
                                 "di elaborazione.",
+                severity = EventSeverity.INFO,
         )
         return true
     }
@@ -876,7 +886,7 @@ class ControlUnitServiceImpl(
         // devono vedere lo stesso fronte — il taccuino degli eventi e la richiesta di sanita'.
         val appeared = appearedFlags(previousStatus, c.statusRaw)
         serverEvents.recordStatusEvents(cu, appeared)
-        askMuCheckIfNeeded(cu, appeared)
+        askWhatIsNeeded(cu, appeared)
     }
 
     /**
@@ -899,10 +909,31 @@ class ControlUnitServiceImpl(
      * ha ancora un campo per confermarli. Reagire alla presenza invece che alla comparsa
      * significherebbe un downlink a ogni poll, cioe' uno ogni minuto sulle CU attuali.
      */
-    private fun askMuCheckIfNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
-        val triggers = setOf("reset", "topology_changed")
-        val appeared = appearedFlags.map { it.meaning }.filter { it in triggers }
-        if (appeared.isEmpty()) return
+    private fun askWhatIsNeeded(cu: ControlUnit, appearedFlags: List<StatusBit>) {
+        val comparsi = appearedFlags.map { it.meaning }.toSet()
+        var command1 = 0
+        val richieste = mutableListOf<String>()
+
+        if (comparsi.any { it in setOf("reset", "topology_changed") }) {
+            command1 = command1 or COMMAND1_MU_CHECK
+            richieste += "controllo di sanita' delle MU"
+        }
+
+        /*
+         * Sincronizzazione del tempo scaduta.
+         *
+         * Il bit 4 di Command1 non trasporta l'ora e non potrebbe: l'ora viaggia come
+         * comando MAC fra dispositivo e network server (DeviceTimeReq / DeviceTimeAns), un
+         * colloquio in cui il livello applicativo non entra. Quel bit dice alla CU di andare
+         * a chiederla.
+         */
+        if ("time_sync_expired" in comparsi) {
+            command1 = command1 or COMMAND1_TIME_SYNC
+            richieste += "ri-sincronizzazione del tempo"
+        }
+
+        if (command1 == 0) return
+        val appeared = richieste
 
         // Senza periodo di poll non si puo' comporre una 0x0A: il comando non parte, ma il
         // motivo va detto, perche' altrimenti la topologia resta disallineata in silenzio.
@@ -915,12 +946,23 @@ class ControlUnitServiceImpl(
             return
         }
 
-        sendCuConfig(cu, command1 = COMMAND1_MU_CHECK)
-        log.info(
-                "CU devEUI={}: {} -> chiesto il controllo di sanita' delle MU",
-                cu.devEui,
-                appeared.joinToString(),
-        )
+        sendCuConfig(cu, command1 = command1)
+        log.info("CU devEUI={}: chiesto {}", cu.devEui, appeared.joinToString(" e "))
+    }
+
+    /**
+     * Chiede alla CU di risincronizzare l'orologio, a mano.
+     *
+     * La richiesta automatica scatta sul **fronte** del bit 11, cioe' quando la
+     * sincronizzazione scade; se il bit e' alzato da prima non c'e' nessun fronte da vedere,
+     * e questo e' il modo per forzarla.
+     */
+    @Transactional
+    override fun requestTimeSync(controlUnitId: Long): ControlUnitDTO {
+        val cu = ownedControlUnit(controlUnitId)
+        sendCuConfig(cu, command1 = COMMAND1_TIME_SYNC)
+        log.info("CU {}: chiesta la ri-sincronizzazione del tempo", cu.deviceId)
+        return cu.toDTO(templateService, protocolService)
     }
 
     /**
@@ -1397,7 +1439,31 @@ class ControlUnitServiceImpl(
             // I conti tornano: se era aperto un avviso «comando non applicato», si chiude da
             // solo. Un avviso che resta quando non vale piu' insegna a ignorare gli avvisi.
             serverEvents.close(cu, EventOrigin.SERVER, ServerEventCode.CONFIG_NOT_APPLIED)
-            log.warn(
+
+            /*
+             * E con lui se ne va l'avviso dei report scartati. Finora quei contatori si
+             * azzeravano solo all'arrivo di un report allineato — fino a un periodo di
+             * trasmissione dopo — quindi la scheda continuava a dire «configurazione
+             * disallineata» quando il disallineamento era gia' rientrato.
+             */
+            cu.configMismatchCount = 0
+            cu.lastConfigMismatchAt = null
+            cu.lastReportedConfigVersion = null
+            cur.save(cu)
+
+            // Un riallineamento e' un fatto, non un problema: si registra come gli altri, ma
+            // in chiaro, perche' mostrarlo del colore degli avvisi insegna a ignorarli.
+            serverEvents.record(
+                    cu = cu,
+                    origin = EventOrigin.SERVER,
+                    code = ServerEventCode.CONFIG_REALIGNED,
+                    description =
+                            "Configurazione riallineata: il server attendeva CFG_VER $expected, la CU " +
+                                    "dichiara $reported e il comando $appliedCmdSeq risulta applicato.",
+                    severity = EventSeverity.INFO,
+            )
+
+            log.info(
                     "CU devEUI={}: CFG_VER {} contro i {} contati, ma il comando applicato e' il {} che il server ha inviato: il server si allinea e fotografa la configurazione corrente",
                     cu.devEui,
                     reported,

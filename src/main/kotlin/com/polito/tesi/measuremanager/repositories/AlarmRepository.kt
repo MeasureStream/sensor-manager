@@ -45,6 +45,23 @@ interface DeviceEventRepository : JpaRepository<DeviceEvent, Long> {
             code: Int,
     ): List<DeviceEvent>
 
+    /**
+     * L'avviso aperto per quel codice **su quel canale**.
+     *
+     * Gli eventi del dispositivo hanno un soggetto: lo stesso codice su due sensori diversi
+     * sono due fatti, e unirli perderebbe quale dei due e' guasto. Lo stesso codice sullo
+     * stesso canale, invece, e' il medesimo fatto che dura, e di quello si tiene una riga
+     * sola. L'interfaccia poi riunisce in un badge solo i testi uguali, ma le righe restano
+     * distinte nello storico, dove il dettaglio serve.
+     */
+    fun findFirstByControlUnit_IdAndOriginAndCodeAndSourceAndSensorIndexAndAcknowledgedAtIsNull(
+            controlUnitId: Long,
+            origin: String,
+            code: Int,
+            source: Int,
+            sensorIndex: Int,
+    ): DeviceEvent?
+
     @Modifying
     @Query(
             """

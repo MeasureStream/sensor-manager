@@ -84,4 +84,12 @@ class DeviceEvent(
         @Column(name = "age_uncertainty_seconds") var ageUncertaintySeconds: Int? = null,
         @Column(columnDefinition = "text") var description: String? = null,
         @Column(name = "acknowledged_at") var acknowledgedAt: OffsetDateTime? = null,
+        /**
+         * Quante volte il fatto si e' ripetuto mentre l'avviso era aperto.
+         *
+         * Un evento della 0xA2 non ha rientro: la CU lo rimanda finche' la condizione dura.
+         * Invece di una riga per uplink se ne tiene una sola e si conta — cosi' la testata
+         * della scheda mostra una notifica per tipo, e quante volte e' tornata resta scritto.
+         */
+        @Column(nullable = false) var occurrences: Int = 1,
 )

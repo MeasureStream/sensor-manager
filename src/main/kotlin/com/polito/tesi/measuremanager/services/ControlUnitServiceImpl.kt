@@ -408,11 +408,21 @@ class ControlUnitServiceImpl(
         checkSameDevice(cu, command)
 
         val plan = planner.plan(cu, command)
-        requireTransmissionPeriod(cu, plan)
+
+        // Il periodo di trasmissione, se la richiesta ne porta uno nuovo, si scrive prima di
+        // comporre i comandi: la 0x21 lo legge dallo stato della CU.
+        val extraWarnings = mutableListOf<String>()
+        val transmissionChanged =
+                applyTransmissionIndex(cu, command.transmissionIndex, extraWarnings)
+
+        // Se cambia solo il periodo di trasmissione la 0x21 parte comunque: e' il suo unico
+        // mezzo di trasporto, ed essendo un comando di stato pieno rimanda anche il resto.
+        val sendPeriods = plan.periodsChanged || transmissionChanged
+        requireTransmissionPeriod(cu, sendPeriods)
 
         val sent = mutableListOf<SentCommandDTO>()
 
-        if (plan.periodsChanged) {
+        if (sendPeriods) {
             // samplingF conserva l'indice di scala: e' il numero che viaggia sul filo.
             plan.sensors.forEach { it.target.sensor.samplingF = it.periodIndex.toDouble() }
             sent += sendPeriodsCommand(cu, plan)
@@ -428,10 +438,10 @@ class ControlUnitServiceImpl(
 
         val warnings =
                 if (sent.isEmpty()) {
-                    plan.warnings +
+                    plan.warnings + extraWarnings +
                             "Nessuna modifica da applicare: i valori richiesti erano gia' quelli in opera."
                 } else {
-                    plan.warnings
+                    plan.warnings + extraWarnings
                 }
 
         if (sent.isEmpty()) {
@@ -469,16 +479,65 @@ class ControlUnitServiceImpl(
      * inventato e' una scorciatoia dichiarata, qui inventarlo vorrebbe dire scegliere ogni
      * quanto un dispositivo occupa l'etere. Quindi si rifiuta, e si dice cosa fare.
      *
-     * Il blocco vale solo quando i periodi cambiano davvero: configurare le sole funzioni di
-     * elaborazione non passa dalla 0x21 e non ha motivo di essere fermato.
+     * Il blocco vale solo quando la 0x21 parte davvero: configurare le sole funzioni di
+     * elaborazione non passa da quel comando e non ha motivo di essere fermato. E non scatta
+     * quando la richiesta porta con se' un periodo valido, perche' a quel punto il valore
+     * c'e' — l'ha scelto chi ha premuto Salva, nella stessa azione.
      */
-    private fun requireTransmissionPeriod(cu: ControlUnit, plan: SensorConfigPlan) {
-        if (!plan.periodsChanged || cu.transmissionInterval > 0) return
+    private fun requireTransmissionPeriod(cu: ControlUnit, sendPeriods: Boolean) {
+        if (!sendPeriods || cu.transmissionInterval > 0) return
         throw OperationNotAllowed(
                 "Periodo di trasmissione non configurato per ${cu.deviceId}: il comando dei periodi lo " +
                         "trasporta nel primo blocco e il valore 0 vale «non trasmettere». Imposta prima " +
                         "l'intervallo di trasmissione, poi riprova."
         )
+    }
+
+    /**
+     * Scrive il periodo di trasmissione che la richiesta porta con se', se ne porta uno.
+     *
+     * Toglie un passo che l'interfaccia non riusciva a raccontare. Il cursore in cima alla
+     * pagina viveva nel browser finche' non si premeva «Applica»; la configurazione dei
+     * sensori leggeva invece il valore sul database, ancora zero, e la rifiutava. Due
+     * comandi dove chi guardava vedeva una sola azione, e un rifiuto per un valore che
+     * credeva di aver impostato.
+     *
+     * Il downlink non aumenta: il periodo e' il quarto byte del blocco 0 della 0x21, che
+     * parte comunque. Quello che sparisce e' la 0x24 che serviva solo a scrivere il valore.
+     *
+     * @return vero se il valore e' cambiato, cioe' se la 0x21 deve partire per portarlo.
+     */
+    private fun applyTransmissionIndex(
+            cu: ControlUnit,
+            requested: Int?,
+            warnings: MutableList<String>,
+    ): Boolean {
+        if (requested == null || requested == cu.transmissionInterval) return false
+
+        if (requested <= 0) {
+            warnings +=
+                    "Indice di trasmissione 0: sulla scala vale «non trasmettere», e da qui non si " +
+                            "ferma una CU. Il periodo resta quello di prima; per fermarla c'e' il " +
+                            "comando della trasmissione."
+            return false
+        }
+
+        if (protocolService.transmissionPeriodMinutes(requested) == null) {
+            warnings +=
+                    "Indice di trasmissione $requested fuori dalla scala del protocollo: il periodo " +
+                            "resta quello di prima."
+            return false
+        }
+
+        log.info(
+                "CU {}: periodo di trasmissione da {} a {}, dentro la configurazione dei sensori",
+                cu.deviceId,
+                cu.transmissionInterval,
+                requested,
+        )
+        cu.transmissionInterval = requested
+        cur.save(cu)
+        return true
     }
 
     /**

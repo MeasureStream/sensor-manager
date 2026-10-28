@@ -112,6 +112,45 @@ class AlarmService(
             // porta dietro l'incertezza della fascia di codifica.
             val occurred = entry.elapsed?.let { received.minusSeconds(it.seconds) }
 
+            // Un fatto che dura si scrive una volta sola. L'evento della 0xA2 non ha
+            // rientro: la CU lo rimanda a ogni messaggio finche' la condizione c'e', e senza
+            // questo controllo diventava una riga per uplink — con la testata della scheda
+            // ridotta a una fila di badge identici, che non si legge, si ignora.
+            //
+            // L'identita' comprende il soggetto: lo stesso codice su due canali diversi sono
+            // due guasti, e unirli nasconderebbe quale sensore e' andato. Quando l'avviso e'
+            // gia' aperto si aggiorna quello — l'ultima volta che si e' visto, il parametro
+            // che puo' essere cresciuto («5 fallimenti» diventa «7»), il conteggio.
+            val aperto =
+                    events
+                            .findFirstByControlUnit_IdAndOriginAndCodeAndSourceAndSensorIndexAndAcknowledgedAtIsNull(
+                                    cu.id,
+                                    EventOrigin.DEVICE,
+                                    entry.code,
+                                    entry.source,
+                                    entry.sensorIndex,
+                            )
+
+            if (aperto != null) {
+                aperto.occurrences += 1
+                aperto.receivedAt = received
+                aperto.occurredAt = occurred
+                aperto.ageRaw = entry.ageRaw
+                aperto.ageUncertaintySeconds = entry.elapsed?.uncertaintySeconds
+                aperto.eventSeq = message.eventSeq
+                aperto.param = entry.param
+                aperto.description = entry.description
+                events.save(aperto)
+
+                log.debug(
+                        "Evento ancora aperto da CU {}, {} volte: {}",
+                        cu.name,
+                        aperto.occurrences,
+                        entry.description,
+                )
+                return@forEach
+            }
+
             events.save(
                     DeviceEvent(
                             controlUnit = cu,

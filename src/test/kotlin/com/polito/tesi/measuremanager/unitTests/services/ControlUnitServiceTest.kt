@@ -1090,6 +1090,69 @@ class ControlUnitServiceTest {
     }
 
     @Test
+    fun `il periodo di trasmissione arriva con la configurazione, senza comandi in piu'`() {
+        // Il cursore in cima alla pagina non viaggiava: viveva nel browser finche' non si
+        // premeva «Applica», e la configurazione leggeva lo zero sul database. Adesso parte
+        // con la richiesta, e la 0x21 lo porta nel blocco 0 — un downlink, non due.
+        val cu = cuConfigurabile().apply { transmissionInterval = 0 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { protocol.transmissionPeriodMinutes(1) } returns 15L
+        every { ts.getDocument(any()) } returns null
+        every { cur.bumpCmdSeq(42L) } returns 1
+        every { cur.readCmdSeq(42L) } returns 7
+        every { encoder.encodePeriods(any(), any(), any()) } returns
+                listOf(EncodedPayload(byteArrayOf(1, 2, 3), FPort.PERIODS))
+        every { kcu.sendDownlink(any(), any()) } returns Unit
+
+        val esito =
+                service.applySensorConfig(
+                        42L,
+                        SensorConfigCommandSetDTO(
+                                transmissionIndex = 1,
+                                sampling =
+                                        listOf(
+                                                SamplingCommandDTO(
+                                                        SensorSelectorDTO(kind = "broadcast"),
+                                                        periodIndex = 65,
+                                                )
+                                        ),
+                        ),
+                )
+
+        assertEquals(1, cu.transmissionInterval, "il periodo scelto resta scritto")
+        assertEquals(
+                listOf(FPort.PERIODS),
+                esito.commands.map { it.fPort },
+                "una sola 0x21, nessuna 0x24 per il solo periodo",
+        )
+        // Il valore che viaggia e' quello appena scelto, non lo zero di partenza.
+        verify { encoder.encodePeriods(any(), 7, 1) }
+    }
+
+    @Test
+    fun `dalla configurazione dei sensori non si ferma una CU`() {
+        val cu = cuConfigurabile()
+
+        every { ss.isAdmin() } returns true
+        every { cur.findByIdOrNull(42L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { protocol.dictionary(any()) } returns null
+        every { ts.getDocument(any()) } returns null
+
+        val esito =
+                service.applySensorConfig(42L, SensorConfigCommandSetDTO(transmissionIndex = 0))
+
+        assertEquals(1, cu.transmissionInterval, "lo zero non si applica da qui")
+        assertTrue(esito.commands.isEmpty())
+        assertTrue(esito.warnings.any { it.contains("non trasmettere") })
+        verify(exactly = 0) { kcu.sendDownlink(any(), any()) }
+    }
+
+    @Test
     fun `il CMD_SEQ lo assegna il database, non la copia in memoria`() {
         // Due richieste parallele leggevano lo stesso numero e lo usavano entrambe: la CU
         // riconosceva la seconda come ritrasmissione e la scartava. Ora il numero arriva da

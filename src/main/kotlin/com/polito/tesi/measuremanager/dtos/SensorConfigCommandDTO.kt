@@ -27,6 +27,21 @@ data class SensorConfigCommandSetDTO(
          * fotografia vecchia.
          */
         val configVersion: Int? = null,
+        /**
+         * Periodo di trasmissione della CU, come indice di scala. Null = lascialo com'e'.
+         *
+         * Sta qui, e non soltanto nel comando dedicato, perche' la 0x21 lo **trasporta
+         * gia'**: e' il quarto byte del blocco 0, come valore assoluto. Mandarlo insieme
+         * alla configurazione non costa nessun downlink in piu', mentre impostarlo prima
+         * con la 0x24 ne costa uno e un CMD_SEQ — e costava soprattutto un passo che
+         * l'interfaccia non riusciva a raccontare: il cursore scelto e non applicato
+         * restava nel browser, e la configurazione leggeva lo zero sul database.
+         *
+         * Lo zero non si accetta da qui. Sulla scala vale «non trasmettere», e fermare una
+         * CU non e' un effetto collaterale che si subisce configurando dei sensori: per
+         * quello c'e' il comando della trasmissione, dove la scelta e' esplicita.
+         */
+        val transmissionIndex: Int? = null,
         val sampling: List<SamplingCommandDTO> = emptyList(),
         val processing: List<ProcessingCommandDTO> = emptyList(),
         val thresholds: List<ThresholdCommandDTO> = emptyList(),

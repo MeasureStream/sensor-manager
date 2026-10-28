@@ -39,6 +39,8 @@ data class DeviceEventDTO(
         val code: Int,
         val param: Int?,
         val description: String?,
+        /** Quante volte il fatto si e' ripetuto mentre l'avviso era aperto. */
+        val occurrences: Int,
         val acknowledged: Boolean,
 )
 
@@ -71,5 +73,6 @@ fun DeviceEvent.toDTO() =
                 code = code,
                 param = param,
                 description = description,
+                occurrences = occurrences,
                 acknowledged = acknowledgedAt != null,
         )

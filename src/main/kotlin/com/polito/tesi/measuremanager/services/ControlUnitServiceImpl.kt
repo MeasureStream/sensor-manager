@@ -201,6 +201,14 @@ class ControlUnitServiceImpl(
         cu.user = currentUser
         cu.name = "La mia CU $decodedDevEui"
 
+        // Le MU censite mentre la CU era orfana non hanno proprietario. Senza questo
+        // passaggio resterebbero fuori dall'elenco di chi le possiede, pur essendo montate
+        // su un dispositivo appena rivendicato.
+        cu.measurementUnits.forEach { mu ->
+            mu.user = currentUser
+            mur.save(mu)
+        }
+
         return cur.save(cu).toDTO(templateService, protocolService)
     }
 
@@ -898,6 +906,11 @@ class ControlUnitServiceImpl(
         val savedCu = cur.save(cu)
 
         savedCu.measurementUnits.toList().forEach { mu ->
+            // Il legame attivo si scioglie, la memoria no: senza l'ultima CU una MU staccata
+            // sparisce dal server, e con lei lo stato, gli errori e le misure che il
+            // database conserva comunque.
+            mu.lastControlUnit = savedCu
+            mu.detachedAt = OffsetDateTime.now()
             mu.controlUnit = null
             mur.save(mu)
         }
@@ -932,6 +945,13 @@ class ControlUnitServiceImpl(
 
             mu.controlUnit = savedCu
             mu.user = savedCu.user
+            mu.lastControlUnit = savedCu
+            mu.detachedAt = null
+            mu.lastSeen = OffsetDateTime.now()
+            // Una MU che ricompare in topologia e' di nuovo in uso: se qualcuno l'aveva
+            // dissociata, torna nell'elenco. Tenerla nascosta mentre misura sarebbe una
+            // bugia, e la dissociazione non e' un divieto: e' un «non mi serve piu'».
+            mu.archivedAt = null
 
             savedCu.measurementUnits.add(mu)
 
@@ -1523,6 +1543,19 @@ class ControlUnitServiceImpl(
             )
             return
         }
+
+        // Le MU che hanno occupato posto nel report si sono fatte vive. Per molte e' l'unico
+        // contatto che producono: lo stato 0x12 non e' periodico, e la topologia arriva solo
+        // quando cambia.
+        val adesso = OffsetDateTime.now()
+        plan.mapNotNull { it.first.measurementUnit }
+                // Per riferimento e non per chiave: nella stessa sessione Hibernate la stessa
+                // riga e' lo stesso oggetto, e una MU appena creata non ha ancora un id.
+                .distinct()
+                .forEach {
+                    it.lastSeen = adesso
+                    mur.save(it)
+                }
 
         metricSampleRepository.saveAll(samples)
         log.info(

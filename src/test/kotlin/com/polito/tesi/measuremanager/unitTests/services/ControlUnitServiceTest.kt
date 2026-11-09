@@ -801,6 +801,8 @@ class ControlUnitServiceTest {
         every { ts.getDocument(any()) } returns null
         every { ts.getTemplate(any()) } returns null
         every { reportDecoder.expectedMetrics(any(), any()) } returns listOf("mean", "variance")
+        // Un report e' un contatto per le MU che ci sono dentro: il servizio ne segna l'ora.
+        every { mur.save(any()) } answers { firstArg() }
         // Un simulacro del decoder che consuma i byte come farebbe quello vero.
         every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
             val buffer = firstArg<ByteBuffer>()
@@ -838,6 +840,11 @@ class ControlUnitServiceTest {
 
         verify(exactly = 6) { reportDecoder.decodeSlot(any(), any(), any(), any()) }
         assertEquals(0L, cu.decodeFailureCount, "il report si legge per intero, niente da scartare")
+        // Le MU che hanno occupato posto nel report risultano viste: e' l'unico contatto che
+        // molte producono, perche' lo stato 0x12 non e' periodico.
+        cu.measurementUnits.forEach {
+            assertNotNull(it.lastSeen, "MU ${it.localId}: il report vale come contatto")
+        }
     }
 
     // --- TEST: il taccuino degli eventi del server ---

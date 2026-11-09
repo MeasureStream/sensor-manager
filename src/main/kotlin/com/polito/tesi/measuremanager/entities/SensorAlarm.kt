@@ -19,6 +19,10 @@ class SensorAlarm(
         @JoinColumn(name = "control_unit_id")
         var controlUnit: ControlUnit? = null,
         @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "sensor_id") var sensor: Sensor? = null,
+        /** La MU che ha prodotto l'allarme: resta sua anche se cambia CU o Local ID. */
+        @ManyToOne(fetch = FetchType.LAZY)
+        @JoinColumn(name = "measurement_unit_id")
+        var measurementUnit: MeasurementUnit? = null,
         @Column(name = "received_at", nullable = false)
         var receivedAt: OffsetDateTime = OffsetDateTime.now(),
         @Column(name = "alarm_seq") var alarmSeq: Int? = null,

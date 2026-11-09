@@ -66,6 +66,7 @@ class AlarmService(
                     SensorAlarm(
                             controlUnit = cu,
                             sensor = sensor,
+                            measurementUnit = muAt(cu, entry.localId),
                             receivedAt = received,
                             alarmSeq = message.alarmSeq,
                             localId = entry.localId,
@@ -157,6 +158,7 @@ class AlarmService(
                             sensor =
                                     if (entry.sensorIndex == 0xFF) null
                                     else sensorAt(cu, entry.source, entry.sensorIndex),
+                            measurementUnit = muAt(cu, entry.source),
                             receivedAt = received,
                             eventSeq = message.eventSeq,
                             source = entry.source,
@@ -176,6 +178,16 @@ class AlarmService(
     }
 
     /* ------------------------------------------------------------------ interno */
+
+    /**
+     * La MU con quel Local ID, se la CU la conosce.
+     *
+     * Si scrive sulla riga al momento in cui nasce, e non si ricalcola dopo: il Local ID e'
+     * una posizione sul bus, non un'identita', e la stessa coppia (CU, Local ID) puo'
+     * indicare domani un'altra MU.
+     */
+    private fun muAt(cu: ControlUnit, localId: Int): MeasurementUnit? =
+            cu.measurementUnits.firstOrNull { it.localId == localId }
 
     /** Il sensore all'indirizzo (LID della MU, indice nel modello). */
     private fun sensorAt(cu: ControlUnit, localId: Int, sensorIndex: Int): Sensor? =

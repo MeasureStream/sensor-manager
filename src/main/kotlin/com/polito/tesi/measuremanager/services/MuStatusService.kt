@@ -68,6 +68,8 @@ class MuStatusService(
 
             mu.statusWord = entry.statusWord
             mu.statusAt = now
+            // Lo stato e' un contatto come un altro, e per una MU ferma e' spesso l'unico.
+            mu.lastSeen = now
             mur.save(mu)
 
             val flags = protocol.muStatusFlags(entry.statusWord)

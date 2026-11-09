@@ -65,6 +65,16 @@ class DeviceEvent(
         @JoinColumn(name = "control_unit_id")
         var controlUnit: ControlUnit? = null,
         @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "sensor_id") var sensor: Sensor? = null,
+        /**
+         * La MU che ha prodotto il fatto.
+         *
+         * Non si ricava dal sensore: per gli eventi di livello MU — `sensorIndex` 0xFF — il
+         * sensore e' nullo proprio li' dove la MU conta. E non si ricava da [source], che e'
+         * il Local ID **di allora**: dopo uno spostamento quella coppia risponde il falso.
+         */
+        @ManyToOne(fetch = FetchType.LAZY)
+        @JoinColumn(name = "measurement_unit_id")
+        var measurementUnit: MeasurementUnit? = null,
         @Column(name = "received_at", nullable = false)
         var receivedAt: OffsetDateTime = OffsetDateTime.now(),
         /** Uno fra i valori di [EventOrigin]: separa anche gli spazi dei codici. */

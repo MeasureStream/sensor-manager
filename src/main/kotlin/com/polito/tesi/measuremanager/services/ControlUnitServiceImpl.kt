@@ -304,16 +304,15 @@ class ControlUnitServiceImpl(
     // se li contendono.
     @Transactional
     override fun sendSensorSamplingUpdate(command: CUConfigurationDTO): CUConfigurationDTO {
-        // 1. Controllo permessi (Security)
-        if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
-
-        // 2. Recupero della Entity CU tramite devEui
-        // Assumiamo che devEui nel DB sia memorizzato come Long o String
+        // 1. Recupero della Entity CU tramite devEui
         val cu =
                 cur.findByDevEui(command.devEui.toLong())
                         ?: throw EntityNotFoundException(
                                 "Control Unit con DevEui ${command.devEui} non trovata"
                         )
+
+        // 2. Permessi: configurare una CU e' di chi la possiede, non del solo amministratore.
+        requireOwnership(cu)
 
         // 2b. Enforcement del limite MAX_SENSORS_PER_CU (48):
         // ricostruiamo l'insieme dei sensori configurabili con lo stesso ordinamento
@@ -860,12 +859,12 @@ class ControlUnitServiceImpl(
     override fun sendTransmissionCommand(
             command: CUTransmissionCommandDTO
     ): CUTransmissionCommandDTO {
-        if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
         val cu =
                 cur.findByDevEui(command.devEui.toLong())
                         ?: throw EntityNotFoundException(
                                 "Control Unit con DevEui ${command.devEui} non trovata"
                         )
+        requireOwnership(cu)
         cu.transmissionInterval = command.transmissionIndex
         cur.save(cu)
 
@@ -1223,13 +1222,13 @@ class ControlUnitServiceImpl(
 
     @Transactional
     override fun updateMeasureConfig(dto: MeasureCUConfigRequest): MeasureCUConfigRequest {
-        // 0. Controlla i permessi (se necessario come negli altri metodi)
-        if (!ss.isAdmin()) throw OperationNotAllowed("Non hai i permessi per configurare i sensori")
-
         val c =
                 cur.findById(dto.cuid).orElseThrow {
                     Exception("CU non trovata con ID: ${dto.cuid}")
                 }
+
+        // 0. Permessi: la stessa regola del resto della configurazione, il possesso.
+        requireOwnership(c)
 
         // 1. Mappa di ricerca per aggiornare i sensori (extendedId, sensorId)
         val configMap = dto.sensors.associateBy { Pair(it.extendedId, it.sensorId) }
@@ -1870,6 +1869,29 @@ class ControlUnitServiceImpl(
     /** La `Stat bitmap` della 0x23. La traduzione sta in [StatBitmap], non qui. */
     private fun statBitmapOf(configurationMeasure: String?): Int =
             StatBitmap.of(configurationMeasure)
+
+    /**
+     * Configurare una CU non e' piu' riservato agli amministratori.
+     *
+     * Lo era su tre vie — periodi di campionamento, periodo di trasmissione, tipi di misura —
+     * e non lo era su `applySensorConfig`, la strada della finestra di configurazione nuova:
+     * la stessa impostazione passava o veniva rifiutata a seconda del pulsante premuto. Adesso
+     * la regola e' una sola ed e' quella del possesso, la stessa di `ownedControlUnit`.
+     *
+     * Resta fuori la CU che non e' di nessuno: finche' non la si rivendica non ha un
+     * proprietario a cui rispondere, e l'unico che puo' toccarla e' un amministratore.
+     */
+    private fun requireOwnership(cu: ControlUnit) {
+        if (ss.isAdmin()) return
+        // `User.userId` e' lateinit: su un'entita' costruita a mano e non ancora salvata
+        // leggerlo solleva, e qui una lettura che solleva sarebbe un rifiuto travestito da
+        // errore interno. Non avere un proprietario leggibile vale "non e' tua".
+        val owner = runCatching { cu.user?.userId }.getOrNull()
+        if (owner == null || owner != ss.getCurrentUserId())
+                throw OperationNotAllowed(
+                        "La Control Unit ${cu.deviceId} non e' tua: non puoi configurarla",
+                )
+    }
 
     /** La CU se chi chiede puo' vederla: un utente vede solo le proprie. */
     private fun ownedControlUnit(id: Long): ControlUnit {

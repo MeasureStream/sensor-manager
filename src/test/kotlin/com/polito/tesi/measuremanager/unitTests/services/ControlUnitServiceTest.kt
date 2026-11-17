@@ -10,6 +10,7 @@ import com.polito.tesi.measuremanager.dtos.SamplingCommandDTO
 import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
 import com.polito.tesi.measuremanager.dtos.SensorSelectorDTO
 import com.polito.tesi.measuremanager.entities.ConfigSnapshot
+import com.polito.tesi.measuremanager.entities.Metric
 import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.entities.UplinkFrame
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
@@ -39,6 +40,7 @@ import com.polito.tesi.measuremanager.entities.Sensor
 import com.polito.tesi.measuremanager.template.MuModelService
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.ConfigSnapshotService
+import com.polito.tesi.measuremanager.template.DecodedMetric
 import com.polito.tesi.measuremanager.template.ReportDecoder
 import com.polito.tesi.measuremanager.template.ReportTruncated
 import com.polito.tesi.measuremanager.template.StatusBit
@@ -895,6 +897,63 @@ class ControlUnitServiceTest {
         cu.measurementUnits.forEach {
             assertNotNull(it.lastSeen, "MU ${it.localId}: il report vale come contatto")
         }
+    }
+
+    /**
+     * I grafici si ancorano all'ultima misura del sensore invece che all'orologio: perche'
+     * sia possibile, l'istante del report resta scritto sulla riga del sensore. Lo scrive la
+     * stessa transazione che aggiorna il valore in pagina, quindi non costa una query, e un
+     * sensore che non ha misurato non guadagna una data.
+     */
+    @Test
+    fun `il report lascia sul sensore l'istante dell'ultima misura`() {
+        val cu = cuConfigurabile().apply {
+            configVersion = 5
+            measurementUnits = mutableListOf(mu0001(65537L, 1))
+        }
+        // Accelerometro spento: non occupa posto nel report, quindi non ha misurato niente.
+        cu.measurementUnits.flatMap { it.sensors }.forEach {
+            it.samplingF = if (it.sensorIndex == 0) 0.0 else 47.0
+        }
+
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { mur.save(any()) } answers { firstArg() }
+        every { ts.getDocument(any()) } returns null
+        every { ts.getTemplate(any()) } returns null
+        every { reportDecoder.expectedMetrics(any(), any()) } returns listOf("mean")
+        // Una media per slot, due byte ciascuno: il minimo che conti come misura.
+        every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
+            val buffer = firstArg<ByteBuffer>()
+            buffer.position(buffer.position() + 2)
+            listOf(DecodedMetric(metric = Metric.MEAN, raw = 1000.0, value = 25.0, converted = true))
+        }
+
+        val quando = "2026-11-17T10:00:00Z"
+        service.onMeasuresUpdate(
+                CuMeasuresUpdate(
+                        devEui = 111L,
+                        deviceId = "cu-0001001",
+                        configVersion = 5,
+                        rawPayload = java.util.Base64.getEncoder().encodeToString(ByteArray(6)),
+                        timestamp = quando,
+                        content = 0x01,
+                )
+        )
+
+        val sensori = cu.measurementUnits.first().sensors
+        sensori.filter { it.sensorIndex != 0 }.forEach {
+            assertEquals(
+                    OffsetDateTime.parse(quando),
+                    it.lastValueAt,
+                    "sensore ${it.sensorIndex}: l'ora della misura resta sulla riga",
+            )
+            assertEquals(25.0, it.physVal, "sensore ${it.sensorIndex}: valore in pagina aggiornato")
+        }
+        assertNull(
+                sensori.first { it.sensorIndex == 0 }.lastValueAt,
+                "il sensore spento non ha misurato: niente data",
+        )
     }
 
     // --- TEST: il taccuino degli eventi del server ---

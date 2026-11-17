@@ -36,6 +36,12 @@ data class SensorDTO(
      * resta visibile in UI ma non è configurabile (campionamento forzato a OFF).
      */
     val configurable: Boolean = true,
+    /**
+     * Quando questo sensore ha misurato l'ultima volta: ci si ancora la finestra dei
+     * grafici, che altrimenti parte da «adesso» e inquadra il vuoto di un sensore spento.
+     * Null se non ha mai prodotto una misura buona.
+     */
+    val lastValueAt: java.time.OffsetDateTime? = null,
 )
 
 fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true): SensorDTO {
@@ -65,5 +71,6 @@ fun Sensor.toDTO(templateService: TemplateService, configurable: Boolean = true)
         template = ref,
         templateResolved = ref != null,
         configurable = configurable,
+        lastValueAt = this.lastValueAt,
     )
 }

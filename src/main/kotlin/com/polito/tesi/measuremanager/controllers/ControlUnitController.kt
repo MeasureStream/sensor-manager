@@ -5,6 +5,7 @@ import com.polito.tesi.measuremanager.dtos.CUConfigurationDTO
 import com.polito.tesi.measuremanager.dtos.CUMetadataUpdateDTO
 import com.polito.tesi.measuremanager.dtos.CUTransmissionCommandDTO
 import com.polito.tesi.measuremanager.dtos.ControlUnitDTO
+import com.polito.tesi.measuremanager.dtos.ControlUnitSummaryDTO
 import com.polito.tesi.measuremanager.dtos.MeasureCUConfigRequest
 import com.polito.tesi.measuremanager.dtos.SensorConfigCommandSetDTO
 import com.polito.tesi.measuremanager.dtos.SensorConfigResultDTO
@@ -30,6 +31,20 @@ class ControlUnitController(
     fun get(@RequestParam name: String?): List<ControlUnitDTO> {
         log.info("Richiesta GET per le Control Units (filtro nome: {})", name ?: "nessuno")
         return cs.getAllControlUnits(name = name)
+    }
+
+    /**
+     * L'elenco della pagina «Mie CU»: la flotta in una tabella, con gli avvisi aperti.
+     *
+     * Sta su un percorso suo e non su `GET /` per due motivi: porta qualcosa in piu' — gli
+     * allarmi e gli avvisi ancora aperti, che il DTO completo non sa dire — e lascia a terra
+     * tutto quello che la tabella non mostra, cioe' le MU con i loro sensori e i riferimenti
+     * di template, che sono quasi tutto il peso della risposta.
+     */
+    @GetMapping("/summary")
+    fun summaries(): List<ControlUnitSummaryDTO> {
+        log.info("Richiesta dell'elenco delle Control Unit")
+        return cs.summaries()
     }
 
     // --- NEL TUO ControlUnitController.kt ---

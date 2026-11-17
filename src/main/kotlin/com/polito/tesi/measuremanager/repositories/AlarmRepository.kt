@@ -20,6 +20,12 @@ interface OpenCountByUnit {
     val total: Long
 }
 
+/** Lo stesso conteggio raggruppato per CU: la riga della pagina «Mie CU». */
+interface OpenCountByControlUnit {
+    val cuId: Long
+    val total: Long
+}
+
 @Repository
 interface SensorAlarmRepository : JpaRepository<SensorAlarm, Long> {
 
@@ -34,6 +40,23 @@ interface SensorAlarmRepository : JpaRepository<SensorAlarm, Long> {
             """
     )
     fun countOpenByMeasurementUnit(ids: Collection<Long>): List<OpenCountByUnit>
+
+    /**
+     * Gli allarmi aperti di ogni CU dell'elenco, in una query.
+     *
+     * E' la stessa regola di [countByControlUnit_IdAndClearedFalseAndAcknowledgedAtIsNull] —
+     * scattato, non rientrato, non preso in carico — chiesta per tutta la flotta in un colpo
+     * invece di una CU alla volta.
+     */
+    @Query(
+            """
+            select a.controlUnit.id as cuId, count(a) as total
+            from SensorAlarm a
+            where a.controlUnit.id in :ids and a.cleared = false and a.acknowledgedAt is null
+            group by a.controlUnit.id
+            """
+    )
+    fun countOpenByControlUnit(ids: Collection<Long>): List<OpenCountByControlUnit>
 
     fun deleteByMeasurementUnit_Id(measurementUnitId: Long): Long
 
@@ -72,6 +95,17 @@ interface DeviceEventRepository : JpaRepository<DeviceEvent, Long> {
             """
     )
     fun countOpenByMeasurementUnit(ids: Collection<Long>): List<OpenCountByUnit>
+
+    /** Gli avvisi non ancora presi in carico di ogni CU dell'elenco, in una query. */
+    @Query(
+            """
+            select e.controlUnit.id as cuId, count(e) as total
+            from DeviceEvent e
+            where e.controlUnit.id in :ids and e.acknowledgedAt is null
+            group by e.controlUnit.id
+            """
+    )
+    fun countOpenByControlUnit(ids: Collection<Long>): List<OpenCountByControlUnit>
 
     fun deleteByMeasurementUnit_Id(measurementUnitId: Long): Long
 

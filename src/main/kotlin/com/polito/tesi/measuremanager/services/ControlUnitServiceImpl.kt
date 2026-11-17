@@ -124,6 +124,46 @@ class ControlUnitServiceImpl(
         return cur.findAllByUser_UserId(userId).map { it.toDTO(templateService, protocolService) }
     }
 
+    /**
+     * La flotta in una tabella: niente MU, niente sensori, e gli avvisi contati per tutti
+     * insieme.
+     *
+     * Un amministratore vede tutte le CU, come nell'elenco completo: e' la stessa regola di
+     * [getAllControlUnits], e averne due direbbe cose diverse nelle due pagine.
+     */
+    override fun summaries(): List<ControlUnitSummaryDTO> {
+        val units =
+                if (ss.isAdmin()) cur.findAll()
+                else cur.findAllByUser_UserId(ss.getCurrentUserId())
+        if (units.isEmpty()) return emptyList()
+
+        // Tre query per tutto l'elenco, non tre per riga.
+        val ids = units.map { it.id }
+        val allarmi = alarms.countOpenByControlUnit(ids).associate { it.cuId to it.total }
+        val avvisi = deviceEvents.countOpenByControlUnit(ids).associate { it.cuId to it.total }
+        val topologia = mur.countByControlUnit(ids).associateBy { it.cuId }
+
+        return units
+                .map { cu ->
+                    cu.toSummaryDTO(
+                            protocol = protocolService,
+                            measurementUnitCount = topologia[cu.id]?.units?.toInt() ?: 0,
+                            sensorCount = topologia[cu.id]?.sensors?.toInt() ?: 0,
+                            openAlarms = allarmi[cu.id] ?: 0,
+                            openEvents = avvisi[cu.id] ?: 0,
+                    )
+                }
+                // Prima quelle che hanno qualcosa da dire, poi le vive, poi le piu' recenti:
+                // chi apre questa pagina di solito la apre perche' un dispositivo non va.
+                .sortedWith(
+                        compareByDescending<ControlUnitSummaryDTO> { it.openAlarms + it.openEvents }
+                                .thenByDescending { it.configMismatchCount + it.decodeFailureCount }
+                                .thenByDescending { it.online }
+                                .thenByDescending { it.lastSeen }
+                                .thenBy { it.name }
+                )
+    }
+
     override fun getControlUnit(id: Long): ControlUnitDTO? {
         if (ss.isAdmin()) {
             return cur.findByIdOrNull(id)?.toDTO(templateService, protocolService)

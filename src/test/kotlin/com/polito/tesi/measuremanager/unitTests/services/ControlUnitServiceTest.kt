@@ -22,6 +22,8 @@ import com.polito.tesi.measuremanager.kafka.KafkaCuProducer
 import com.polito.tesi.measuremanager.kafka.LorawanPayloadEncoder
 import com.polito.tesi.measuremanager.uplink.FPort
 import com.polito.tesi.measuremanager.repositories.ControlUnitRepository
+import com.polito.tesi.measuremanager.repositories.FleetCountByControlUnit
+import com.polito.tesi.measuremanager.repositories.OpenCountByControlUnit
 import com.polito.tesi.measuremanager.repositories.MeasurementRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
 import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
@@ -413,6 +415,98 @@ class ControlUnitServiceTest {
         assertThrows<OperationNotAllowed> {
             service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
         }
+    }
+
+    /* ------------------------------------------- elenco della flotta («Mie CU») */
+
+    /** Una riga di conteggio come la restituisce la query raggruppata. */
+    private fun flotta(idCu: Long, nUnits: Long, nSensors: Long) =
+            object : FleetCountByControlUnit {
+                override val cuId = idCu
+                override val units = nUnits
+                override val sensors = nSensors
+            }
+
+    private fun aperti(idCu: Long, quanti: Long) =
+            object : OpenCountByControlUnit {
+                override val cuId = idCu
+                override val total = quanti
+            }
+
+    private fun cuFlotta(idCu: Long, nome: String, visto: java.time.LocalDateTime?) =
+            ControlUnit().apply {
+                id = idCu
+                devEui = 0x2CF7F12072903F00L + idCu
+                deviceId = "eui-$idCu"
+                name = nome
+                semanticLocation = "Lab MeS"
+                lastSeen = visto
+            }
+
+    /**
+     * I numeri della tabella arrivano dalle query raggruppate, non da una per riga.
+     *
+     * Non e' un dettaglio di stile: `measurementUnits` e `sensors` sono pigre, e leggerne la
+     * dimensione qui sarebbe una query per CU piu' una per MU a ogni apertura della pagina.
+     */
+    @Test
+    fun `l'elenco delle CU conta MU, sensori e avvisi per tutta la flotta insieme`() {
+        val adesso = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)
+        val uno = cuFlotta(1, "LabMS", adesso)
+        // La seconda non compare nei conteggi: topologia mai notificata, nessun avviso.
+        val due = cuFlotta(2, "Magazzino", adesso.minusDays(3))
+
+        every { ss.isAdmin() } returns false
+        every { ss.getCurrentUserId() } returns "marco"
+        every { cur.findAllByUser_UserId("marco") } returns listOf(uno, due)
+        every { mur.countByControlUnit(any()) } returns listOf(flotta(1, 2, 9))
+        every { alarmRepo.countOpenByControlUnit(any()) } returns listOf(aperti(1, 3))
+        every { eventRepo.countOpenByControlUnit(any()) } returns listOf(aperti(1, 1))
+
+        val righe = service.summaries()
+
+        val labms = righe.first { it.id == 1L }
+        assertEquals(2, labms.measurementUnitCount)
+        assertEquals(9, labms.sensorCount)
+        assertEquals(3, labms.openAlarms)
+        assertEquals(1, labms.openEvents)
+        assertTrue(labms.online, "vista adesso: in linea")
+        assertEquals(
+                java.time.ZoneOffset.UTC,
+                labms.lastSeen?.offset,
+                "l'istante parte con il suo fuso: il browser non deve indovinarlo",
+        )
+
+        val magazzino = righe.first { it.id == 2L }
+        assertEquals(0, magazzino.measurementUnitCount, "assente dai conteggi vuol dire zero")
+        assertEquals(0, magazzino.openAlarms)
+        assertTrue(!magazzino.online, "tre giorni di silenzio")
+
+        // Una query per i conteggi, non una per CU.
+        verify(exactly = 1) { mur.countByControlUnit(any()) }
+        verify(exactly = 1) { alarmRepo.countOpenByControlUnit(any()) }
+        verify(exactly = 0) { cur.findAll() }
+    }
+
+    /** In cima va quella che ha qualcosa da dire, non la piu' recente. */
+    @Test
+    fun `l'elenco delle CU mette per prima quella con avvisi aperti`() {
+        val adesso = java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)
+        val quieta = cuFlotta(1, "Quieta", adesso)
+        val guasta = cuFlotta(2, "Guasta", adesso.minusHours(5))
+        // Terza senza avvisi ma con report persi: viene dopo la guasta, prima della quieta.
+        val scartati = cuFlotta(3, "Scartati", adesso.minusHours(2)).apply { configMismatchCount = 4 }
+
+        every { ss.isAdmin() } returns true
+        every { cur.findAll() } returns mutableListOf(quieta, scartati, guasta)
+        every { mur.countByControlUnit(any()) } returns emptyList()
+        every { alarmRepo.countOpenByControlUnit(any()) } returns listOf(aperti(2, 1))
+        every { eventRepo.countOpenByControlUnit(any()) } returns emptyList()
+
+        val righe = service.summaries()
+
+        assertEquals(listOf(2L, 3L, 1L), righe.map { it.id })
+        assertEquals(4L, righe[1].configMismatchCount, "secondo posto: report persi, nessun avviso")
     }
 
     @Test

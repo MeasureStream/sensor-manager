@@ -53,8 +53,11 @@ private const val MU_OFFLINE_THRESHOLD_MINUTES = 30L
  * `name` e `deviceId` della CU sono `lateinit` su colonne che ammettono il nullo: su una riga
  * nata storta il semplice accesso lancia. In una scheda di dettaglio e' giusto che si veda;
  * in un elenco significherebbe perdere tutte le righe per colpa di una.
+ *
+ * Non e' privato perche' la stessa precauzione serve al riepilogo delle CU: la regola e' una,
+ * e due copie divergerebbero al primo ripensamento.
  */
-private fun ControlUnit.ifSet(read: ControlUnit.() -> String): String? =
+internal fun ControlUnit.ifSet(read: ControlUnit.() -> String): String? =
         runCatching { read() }.getOrNull()
 
 fun ControlUnit.toRefDTO() = ControlUnitRefDTO(id = id, name = ifSet { name }, deviceId = ifSet { deviceId })

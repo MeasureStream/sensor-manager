@@ -11,6 +11,14 @@ interface ControlUnitService {
             name: String?,
     ): List<ControlUnitDTO>
 
+    /**
+     * L'elenco della pagina «Mie CU»: una riga per CU, con gli avvisi ancora aperti.
+     *
+     * Le MU e i loro sensori restano a terra — la tabella ne mostra due numeri — e i
+     * conteggi arrivano da query raggruppate, non una per riga.
+     */
+    fun summaries(): List<ControlUnitSummaryDTO>
+
     fun getAllControlUnitsPage(
             page: Pageable,
             name: String?,

@@ -1526,7 +1526,7 @@ class ControlUnitServiceImpl(
                 )
             }
 
-            updateLiveValue(sensor, decoded)
+            updateLiveValue(sensor, decoded, timestamp)
         }
 
         if (buffer.remaining() > 0) {
@@ -1658,7 +1658,11 @@ class ControlUnitServiceImpl(
      * valore fisico **solo se la conversione e' avvenuta davvero**: un numero non convertito
      * accanto a «°C» sarebbe una misura inventata.
      */
-    private fun updateLiveValue(sensor: Sensor, decoded: List<DecodedMetric>) {
+    private fun updateLiveValue(
+            sensor: Sensor,
+            decoded: List<DecodedMetric>,
+            at: OffsetDateTime,
+    ) {
         val usable = decoded.filterNot { it.noNewData || it.notResponding }
         val live =
                 usable.firstOrNull { it.metric == Metric.MEAN }
@@ -1668,6 +1672,11 @@ class ControlUnitServiceImpl(
 
         sensor.elecVal = live.raw
         if (live.converted && live.value != null) sensor.physVal = live.value!!
+        // Il quando dei due valori qui sopra. Serve ai grafici, che senza partono da
+        // «adesso meno un'ora» e su un sensore che tace da giorni inquadrano il vuoto.
+        // Si scrive solo se una misura buona c'e' stata: il `return` qui sopra ha gia'
+        // escluso i report fatti di sole sentinelle, che non sono misure.
+        sensor.lastValueAt = at
         // Il sensore e' un'entita' gestita dalla transazione: Hibernate scrive al commit.
     }
 

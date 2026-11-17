@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
+import java.time.OffsetDateTime
 
 @Entity
 class Sensor(
@@ -48,5 +49,18 @@ class Sensor(
         @Column(length = 250) var calInitials: String? = null,
 
         // configurations
-        var configurationMeasure: String
+        var configurationMeasure: String,
+
+        /**
+         * Istante dell'ultima misura registrata da questo sensore.
+         *
+         * Sta accanto a `physVal` ed `elecVal` perche' e' la stessa cosa: il quando dei
+         * valori che quelle due colonne tengono. Si scrive nella transazione che li
+         * aggiorna, quindi non costa una query, e in lettura evita di chiedere a
+         * `metric_sample` il massimo per sensore a ogni apertura di una scheda.
+         *
+         * Null finche' il sensore non ha prodotto una misura buona: le sentinelle
+         * «nessun dato nuovo» e «non risponde» non contano, non sono misure.
+         */
+        var lastValueAt: OffsetDateTime? = null,
 )

@@ -39,4 +39,34 @@ class MeasurementUnit {
     var statusWord: Int? = null
 
     var statusAt: java.time.OffsetDateTime? = null
+
+    /**
+     * L'ultima CU su cui e' stata montata, anche dopo lo stacco.
+     *
+     * [controlUnit] e' il legame **attivo** e torna nullo quando la MU sparisce dalla
+     * topologia: lo leggono la decodifica dei report, il pianificatore e le istantanee, e
+     * aggiungere li' un filtro per «staccata» sarebbe il modo di sbagliarne uno. Questo
+     * campo e' solo memoria, e nessuno di quei percorsi lo guarda.
+     */
+    @ManyToOne
+    @JoinColumn(name = "last_control_unit_id", nullable = true)
+    var lastControlUnit: ControlUnit? = null
+
+    /** Quando e' sparita dalla topologia della sua CU; null se e' ancora montata. */
+    var detachedAt: java.time.OffsetDateTime? = null
+
+    /**
+     * Ultima volta che la MU si e' fatta viva, in qualunque modo: una notifica di topologia,
+     * uno stato 0x12, o degli slot suoi dentro un report. Serve a dire «in uso» senza
+     * dedurlo dalla CU, che puo' essere viva mentre una delle sue MU non risponde piu'.
+     */
+    var lastSeen: java.time.OffsetDateTime? = null
+
+    /**
+     * Dissociata: fuori dall'elenco di chi la possiede, con tutti i dati conservati.
+     *
+     * Si azzera da sola se la MU ricompare in una notifica di topologia — e' di nuovo in
+     * uso, e tenerla nascosta sarebbe una bugia.
+     */
+    var archivedAt: java.time.OffsetDateTime? = null
 }

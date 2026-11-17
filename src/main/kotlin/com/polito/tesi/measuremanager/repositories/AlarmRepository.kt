@@ -8,10 +8,34 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.stereotype.Repository
 
+/**
+ * Quanti avvisi aperti ha una MU.
+ *
+ * Una query sola per tutto l'elenco invece di una per riga: la pagina «Mie MU» mostra una
+ * flotta, e un conteggio per riga sarebbe il modo classico di renderla lenta appena la
+ * flotta cresce.
+ */
+interface OpenCountByUnit {
+    val muId: Long
+    val total: Long
+}
+
 @Repository
 interface SensorAlarmRepository : JpaRepository<SensorAlarm, Long> {
 
     fun findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId: Long): List<SensorAlarm>
+
+    @Query(
+            """
+            select a.measurementUnit.id as muId, count(a) as total
+            from SensorAlarm a
+            where a.measurementUnit.id in :ids and a.cleared = false and a.acknowledgedAt is null
+            group by a.measurementUnit.id
+            """
+    )
+    fun countOpenByMeasurementUnit(ids: Collection<Long>): List<OpenCountByUnit>
+
+    fun deleteByMeasurementUnit_Id(measurementUnitId: Long): Long
 
     fun countByControlUnit_IdAndClearedFalseAndAcknowledgedAtIsNull(controlUnitId: Long): Long
 
@@ -29,6 +53,27 @@ interface SensorAlarmRepository : JpaRepository<SensorAlarm, Long> {
 interface DeviceEventRepository : JpaRepository<DeviceEvent, Long> {
 
     fun findTop100ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId: Long): List<DeviceEvent>
+
+    /**
+     * Lo storico di una MU, attraverso gli spostamenti.
+     *
+     * Il limite e' alto perche' questa e' la tabella che si esporta: cinquecento righe sono
+     * piu' di quante se ne leggano, e meno di quante ne servano per rendere pesante la
+     * pagina. Oltre, la domanda giusta e' un filtro per data, non piu' righe.
+     */
+    fun findTop500ByMeasurementUnit_IdOrderByReceivedAtDesc(measurementUnitId: Long): List<DeviceEvent>
+
+    @Query(
+            """
+            select e.measurementUnit.id as muId, count(e) as total
+            from DeviceEvent e
+            where e.measurementUnit.id in :ids and e.acknowledgedAt is null
+            group by e.measurementUnit.id
+            """
+    )
+    fun countOpenByMeasurementUnit(ids: Collection<Long>): List<OpenCountByUnit>
+
+    fun deleteByMeasurementUnit_Id(measurementUnitId: Long): Long
 
     /**
      * Gli eventi ancora aperti di un certo tipo.

@@ -4,12 +4,19 @@ import com.polito.tesi.measuremanager.dtos.MeasurementUnitDTO
 import com.polito.tesi.measuremanager.entities.MeasurementUnit
 import com.polito.tesi.measuremanager.entities.User
 import com.polito.tesi.measuremanager.exceptions.OperationNotAllowed
+import com.polito.tesi.measuremanager.entities.ControlUnit
 import com.polito.tesi.measuremanager.kafka.KafkaMuProducer
+import com.polito.tesi.measuremanager.repositories.DeviceEventRepository
 import com.polito.tesi.measuremanager.repositories.MeasurementUnitRepository
+import com.polito.tesi.measuremanager.repositories.SensorAlarmRepository
 import com.polito.tesi.measuremanager.securityUtils.SecurityService
 import com.polito.tesi.measuremanager.services.MeasurementUnitServiceImpl
+import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.SensorMapper
 import com.polito.tesi.measuremanager.template.TemplateService
+import java.time.OffsetDateTime
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import io.mockk.*
 import org.junit.jupiter.api.assertThrows
 import org.springframework.data.repository.findByIdOrNull
@@ -25,8 +32,15 @@ class MeasurementUnitServiceTest {
     private val sensorMapper = mockk<SensorMapper>()
     private val templateService = mockk<TemplateService>()
     private val ss = mockk<SecurityService>()
+    // Il dizionario di protocollo traduce i bit di stato: qui basta che non risolva niente.
+    private val protocol = mockk<ProtocolService>(relaxed = true)
+    private val deviceEvents = mockk<DeviceEventRepository>()
+    private val alarms = mockk<SensorAlarmRepository>()
 
-    private val service = MeasurementUnitServiceImpl(mur, kmu, sensorMapper, templateService, ss)
+    private val service =
+        MeasurementUnitServiceImpl(
+            mur, kmu, sensorMapper, templateService, ss, protocol, deviceEvents, alarms,
+        )
 
     // --- TEST: get ---
     @Test
@@ -106,6 +120,8 @@ class MeasurementUnitServiceTest {
         every { ss.isAdmin() } returns true
         every { mur.deleteById(muId) } just Runs
         every { kmu.sendMuCreate(any()) } just Runs
+        every { deviceEvents.deleteByMeasurementUnit_Id(muId) } returns 3
+        every { alarms.deleteByMeasurementUnit_Id(muId) } returns 1
 
         // WHEN
         service.delete(muId)
@@ -116,6 +132,69 @@ class MeasurementUnitServiceTest {
         // Verifichiamo che l'evento sia stato inviato
         // Se continua a fallire, il problema è dentro mu.toMUCreateDTO()
         verify(exactly = 1) { kmu.sendMuCreate(any()) }
+
+        // Eventi e allarmi si cancellano a mano: la chiave esterna li lascerebbe in piedi
+        // con il riferimento azzerato, cioe' righe che non si sa piu' di chi siano.
+        verify(exactly = 1) { deviceEvents.deleteByMeasurementUnit_Id(muId) }
+        verify(exactly = 1) { alarms.deleteByMeasurementUnit_Id(muId) }
+    }
+
+    // --- TEST: l'elenco della pagina «Mie MU» ---
+
+    @Test
+    fun `l'elenco porta l'ultima CU anche quando la MU e' staccata`() {
+        val cu = ControlUnit().apply { id = 7; name = "La mia CU"; deviceId = "lora-e5" }
+        val staccata =
+            MeasurementUnit().apply {
+                id = 1
+                extendedId = 0xAABBA1B2
+                model = 1
+                lastControlUnit = cu
+                detachedAt = OffsetDateTime.now().minusDays(2)
+                lastSeen = OffsetDateTime.now().minusDays(2)
+            }
+
+        every { ss.isAdmin() } returns true
+        every { mur.findAllByArchivedAtIsNull() } returns listOf(staccata)
+        every { deviceEvents.countOpenByMeasurementUnit(listOf(1L)) } returns emptyList()
+        every { alarms.countOpenByMeasurementUnit(listOf(1L)) } returns emptyList()
+
+        val riga = service.summaries().single()
+
+        assertEquals("MU hA1B2", riga.label, "la stessa etichetta che compare nelle schede")
+        assertFalse(riga.attached, "non e' montata su nessuna CU")
+        assertFalse(riga.online, "staccata vuol dire non in uso, qualunque sia l'ultimo contatto")
+        assertEquals(7L, riga.controlUnit?.id, "l'ultima CU resta leggibile dopo lo stacco")
+    }
+
+    @Test
+    fun `una MU senza nessun contatto non risulta in uso`() {
+        val mu = MeasurementUnit().apply { id = 2; extendedId = 1L; controlUnit = ControlUnit() }
+
+        every { ss.isAdmin() } returns true
+        every { mur.findAllByArchivedAtIsNull() } returns listOf(mu)
+        every { deviceEvents.countOpenByMeasurementUnit(listOf(2L)) } returns emptyList()
+        every { alarms.countOpenByMeasurementUnit(listOf(2L)) } returns emptyList()
+
+        assertFalse(service.summaries().single().online)
+    }
+
+    // --- TEST: dissocia ---
+
+    @Test
+    fun `dissociare toglie dall'elenco senza cancellare niente`() {
+        val mu = MeasurementUnit().apply { id = 3; extendedId = 42L }
+
+        every { ss.isAdmin() } returns true
+        every { mur.findByIdOrNull(3L) } returns mu
+        every { mur.save(any()) } answers { firstArg() }
+
+        val riga = service.dissociate(3L)
+
+        assertTrue(riga.archived)
+        assertNotNull(mu.archivedAt)
+        verify(exactly = 0) { mur.deleteById(any()) }
+        verify(exactly = 0) { deviceEvents.deleteByMeasurementUnit_Id(any()) }
     }
 
     @Test

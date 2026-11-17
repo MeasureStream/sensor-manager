@@ -28,6 +28,12 @@ interface MeasurementUnitRepository : JpaRepository<MeasurementUnit, Long>, Pagi
 
     fun findAllByUser_UserId(ownerId: String): List<MeasurementUnit>
 
+    /** Le MU di un utente che non sono state dissociate: l'elenco della pagina «Mie MU». */
+    fun findAllByUser_UserIdAndArchivedAtIsNull(ownerId: String): List<MeasurementUnit>
+
+    /** Tutte quelle in elenco, per un amministratore. */
+    fun findAllByArchivedAtIsNull(): List<MeasurementUnit>
+
     fun findAllByUser_UserId(
         ownerId: String,
         pageable: Pageable,

@@ -363,6 +363,56 @@ class ControlUnitServiceTest {
         verify(exactly = 1) { configSnapshots.take(cu) }
     }
 
+    /* ------------------------------------------- permessi sulla configurazione */
+
+    /**
+     * Configurare una CU non e' piu' un privilegio di ruolo.
+     *
+     * Il periodo di trasmissione passava solo da amministratore, mentre lo stesso valore
+     * dentro la configurazione dei sensori passava col solo possesso: la stessa impostazione
+     * accettata o rifiutata a seconda del pulsante. Adesso decide il possesso, qui come la'.
+     */
+    @Test
+    fun `il proprietario configura la propria CU senza essere amministratore`() {
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            configVersion = 0
+            transmissionInterval = 0
+            user = User().apply { userId = "marco" }
+        }
+
+        every { ss.isAdmin() } returns false
+        every { ss.getCurrentUserId() } returns "marco"
+        every { cur.findByDevEui(111L) } returns cu
+        every { cur.save(any()) } answers { firstArg() }
+        every { cur.bumpCmdSeq(any()) } returns 1
+        every { cur.readCmdSeq(any()) } returns 7
+        every { encoder.encodeTransmissionConfig(any(), any()) } returns emptyList()
+
+        service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
+
+        assertEquals(1, cu.transmissionInterval, "il periodo e' stato scritto")
+    }
+
+    /** Aperto a tutti non vuol dire aperto su tutto: le CU di un altro restano sue. */
+    @Test
+    fun `la CU di un altro utente non si configura`() {
+        val cu = ControlUnit().apply {
+            devEui = 111L
+            deviceId = "lora-e5"
+            user = User().apply { userId = "qualcun-altro" }
+        }
+
+        every { ss.isAdmin() } returns false
+        every { ss.getCurrentUserId() } returns "marco"
+        every { cur.findByDevEui(111L) } returns cu
+
+        assertThrows<OperationNotAllowed> {
+            service.sendTransmissionCommand(CUTransmissionCommandDTO("111", 1))
+        }
+    }
+
     @Test
     fun `se la CU conferma l'ultimo comando inviato il server si allinea`() {
         // Il caso reale: due 0x24 applicate dalla CU e non contate dal server. Il CMD_SEQ
@@ -801,6 +851,8 @@ class ControlUnitServiceTest {
         every { ts.getDocument(any()) } returns null
         every { ts.getTemplate(any()) } returns null
         every { reportDecoder.expectedMetrics(any(), any()) } returns listOf("mean", "variance")
+        // Un report e' un contatto per le MU che ci sono dentro: il servizio ne segna l'ora.
+        every { mur.save(any()) } answers { firstArg() }
         // Un simulacro del decoder che consuma i byte come farebbe quello vero.
         every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
             val buffer = firstArg<ByteBuffer>()
@@ -838,6 +890,11 @@ class ControlUnitServiceTest {
 
         verify(exactly = 6) { reportDecoder.decodeSlot(any(), any(), any(), any()) }
         assertEquals(0L, cu.decodeFailureCount, "il report si legge per intero, niente da scartare")
+        // Le MU che hanno occupato posto nel report risultano viste: e' l'unico contatto che
+        // molte producono, perche' lo stato 0x12 non e' periodico.
+        cu.measurementUnits.forEach {
+            assertNotNull(it.lastSeen, "MU ${it.localId}: il report vale come contatto")
+        }
     }
 
     // --- TEST: il taccuino degli eventi del server ---

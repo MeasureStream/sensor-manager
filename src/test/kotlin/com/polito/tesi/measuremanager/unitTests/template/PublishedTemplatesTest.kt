@@ -58,6 +58,24 @@ class PublishedTemplatesTest {
     }
 
     @Test
+    fun `i profili 501 e 502 passano il controllo del registro`() {
+        val frozen = TemplateParser.parse(file("profiles/profile_501_en12830.json").readText(), mapper, TemplateKind.PROFILE)
+        assertEquals(501, frozen.keyId)
+        val climate = TemplateParser.parse(file("profiles/profile_502_en15757.json").readText(), mapper, TemplateKind.PROFILE)
+        assertEquals(502, climate.keyId)
+    }
+
+    @Test
+    fun `un profilo senza limiti ne' clima storico viene rifiutato`() {
+        val none = """{"kind":"profile","templateId":503,"templateVersion":"1.0.0","quantity":"temperature"}"""
+        assertThrows<TemplateRejected> { TemplateParser.parse(none, mapper) }
+        val shortHistory =
+                """{"kind":"profile","templateId":503,"templateVersion":"1.0.0","quantity":"relativeHumidity",
+                   "historicClimate":{"movingAverageDays":30,"percentiles":[7,93],"minHistoryDays":10}}"""
+        assertThrows<TemplateRejected> { TemplateParser.parse(shortHistory, mapper) }
+    }
+
+    @Test
     fun `una procedura senza punti viene rifiutata`() {
         val bad = """{"kind":"procedure","templateId":402,"templateVersion":"1.0.0","quantity":"temperature","points":[]}"""
         assertThrows<TemplateRejected> { TemplateParser.parse(bad, mapper) }

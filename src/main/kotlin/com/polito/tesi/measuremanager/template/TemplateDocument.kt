@@ -116,11 +116,27 @@ object TemplateParser {
             }
             TemplateKind.PROFILE -> {
                 require(node.get("quantity")?.isTextual == true, "quantity mancante")
+                // Limiti fissi (EN 12830) o limiti dal clima storico del punto di controllo (EN 15757).
                 val limits = node.get("limits")
-                require(limits != null && limits.isObject && (limits.has("high") || limits.has("low")),
-                        "limits deve dichiarare almeno high o low")
-                if (limits!!.has("high") && limits.has("low")) {
-                    require(limits.get("low").asDouble() < limits.get("high").asDouble(), "limits.low deve stare sotto limits.high")
+                val climate = node.get("historicClimate")
+                require((limits != null && limits.isObject) || (climate != null && climate.isObject),
+                        "serve limits oppure historicClimate")
+                if (limits != null && limits.isObject) {
+                    require(limits.has("high") || limits.has("low"), "limits deve dichiarare almeno high o low")
+                    if (limits.has("high") && limits.has("low")) {
+                        require(limits.get("low").asDouble() < limits.get("high").asDouble(), "limits.low deve stare sotto limits.high")
+                    }
+                }
+                if (climate != null && climate.isObject) {
+                    val days = climate.get("movingAverageDays")
+                    require(days != null && days.isInt && days.asInt() > 0, "historicClimate.movingAverageDays deve essere un intero positivo")
+                    val percentiles = climate.get("percentiles")
+                    require(percentiles != null && percentiles.isArray && percentiles.size() == 2 && percentiles.all { it.isNumber } &&
+                            percentiles[0].asDouble() > 0 && percentiles[0].asDouble() < percentiles[1].asDouble() && percentiles[1].asDouble() < 100,
+                            "historicClimate.percentiles deve essere [basso, alto] fra 0 e 100")
+                    val history = climate.get("minHistoryDays")
+                    require(history != null && history.isInt && history.asInt() >= days!!.asInt(),
+                            "historicClimate.minHistoryDays deve coprire almeno la media mobile")
                 }
             }
             else -> Unit

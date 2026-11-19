@@ -30,6 +30,12 @@ object QualityFlags {
     const val NO_AGE = 1 shl 7
     /** La configurazione del dispositivo non corrisponde a quella del certificato (fase 6). */
     const val CONFIG_MISMATCH = 1 shl 8
+    /**
+     * Convertito con la formula nominale del modello (template), non con un certificato:
+     * il contrario di CAL_INSTANCE, scritto esplicitamente (PIANO_METROLOGIA 1.14). Un valore
+     * che il dispositivo tara a bordo non ha ne' l'uno ne' l'altro.
+     */
+    const val CAL_NOMINAL = 1 shl 9
 
     /** Nome e bit, nell'ordine: per i DTO, il CSV e l'interfaccia. */
     val ALL: List<Pair<String, Int>> =
@@ -43,6 +49,7 @@ object QualityFlags {
                     "TIME_UNSYNC" to TIME_UNSYNC,
                     "NO_AGE" to NO_AGE,
                     "CONFIG_MISMATCH" to CONFIG_MISMATCH,
+                    "CAL_NOMINAL" to CAL_NOMINAL,
             )
 
     fun names(flags: Int?): List<String> =

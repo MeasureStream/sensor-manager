@@ -58,9 +58,9 @@ class SchemaMigrationTest {
     }
 
     @Test
-    fun `le migrazioni arrivano alla V22 e lo schema valida le entita'`() {
+    fun `le migrazioni arrivano alla V23 e lo schema valida le entita'`() {
         val version = jdbc.queryForObject("select max(version::int) from flyway_schema_history where success", Int::class.java)
-        assertEquals(22, version)
+        assertEquals(23, version)
     }
 
     @Test
@@ -96,5 +96,6 @@ class SchemaMigrationTest {
         assertEquals(1, outbox.findTop200BySentAtIsNullOrderByIdAsc().size)
         jdbc.queryForList("select incertezza_estesa, banda_inf, banda_sup, flag_qualita from grafana.measure_avg_std limit 1")
         jdbc.queryForList("select * from grafana.sensor_calibration limit 1")
+        jdbc.queryForList("select gap_seconds, expected_seconds, missing_reports, is_gap from grafana.report_gaps limit 1")
     }
 }

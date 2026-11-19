@@ -110,7 +110,7 @@ class InstanceCalibrationTest {
         val mean = decoded.first { it.metric == Metric.MEAN }
 
         assertEquals(-6.0 + 30000 * 0.0019073486328125, mean.value!!, 1e-9)
-        assertEquals(QualityFlags.CONVERTED, mean.flags, "convertito, ma non con un certificato")
+        assertEquals(QualityFlags.CONVERTED or QualityFlags.CAL_NOMINAL, mean.flags, "convertito, con la formula di targa")
         assertNull(mean.calibrationId)
         assertEquals(2.0 / kotlin.math.sqrt(3.0), mean.uncertainty?.components?.get("calibration")!!, 1e-12)
     }

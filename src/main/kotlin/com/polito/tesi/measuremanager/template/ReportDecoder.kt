@@ -175,6 +175,11 @@ class ReportDecoder(
 
         var flags = 0
         if (result.converted) flags = flags or QualityFlags.CONVERTED
+        if (result.converted && !usedInstance && transform in setOf("calibration", "variance") &&
+                        template?.outputFormat != "calibrated"
+        ) {
+            flags = flags or QualityFlags.CAL_NOMINAL
+        }
         if (usedInstance) {
             flags = flags or QualityFlags.CAL_INSTANCE
             if (calibration!!.expired) flags = flags or QualityFlags.CAL_EXPIRED

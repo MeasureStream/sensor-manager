@@ -100,10 +100,13 @@ class ControlUnitServiceTest {
     /** Anche il taccuino degli eventi e' quello vero: la regola che conta sta dentro di lui. */
     private val serverEvents = ServerEventRecorder(eventRepo)
 
+    /** Finestre, flag e taratura: qui non sono il soggetto, basta che rispondano. */
+    private val quality = mockk<com.polito.tesi.measuremanager.quality.ReportQualityService>(relaxed = true)
+
     private val service = ControlUnitServiceImpl(
                     cur, mur, mr, sqr, ss, kcu, ts, muModel, protocol, frames, samples,
                     reportDecoder, configSnapshots, alarmRepo, eventRepo, encoder, planner,
-                    serverEvents,
+                    serverEvents, quality,
             )
 
     /** Gli slot dello 0x0001 v0.1.0 come li materializza il registro: indici da 0. */
@@ -950,7 +953,7 @@ class ControlUnitServiceTest {
         // Un report e' un contatto per le MU che ci sono dentro: il servizio ne segna l'ora.
         every { mur.save(any()) } answers { firstArg() }
         // Un simulacro del decoder che consuma i byte come farebbe quello vero.
-        every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
+        every { reportDecoder.decodeSlot(any(), any(), any(), any(), any()) } answers {
             val buffer = firstArg<ByteBuffer>()
             if (buffer.remaining() < 4) {
                 throw ReportTruncated("servivano 4 byte, ne restavano ${buffer.remaining()}")
@@ -984,7 +987,7 @@ class ControlUnitServiceTest {
                 )
         )
 
-        verify(exactly = 6) { reportDecoder.decodeSlot(any(), any(), any(), any()) }
+        verify(exactly = 6) { reportDecoder.decodeSlot(any(), any(), any(), any(), any()) }
         assertEquals(0L, cu.decodeFailureCount, "il report si legge per intero, niente da scartare")
         // Le MU che hanno occupato posto nel report risultano viste: e' l'unico contatto che
         // molte producono, perche' lo stato 0x12 non e' periodico.
@@ -1017,7 +1020,7 @@ class ControlUnitServiceTest {
         every { ts.getTemplate(any()) } returns null
         every { reportDecoder.expectedMetrics(any(), any()) } returns listOf("mean")
         // Una media per slot, due byte ciascuno: il minimo che conti come misura.
-        every { reportDecoder.decodeSlot(any(), any(), any(), any()) } answers {
+        every { reportDecoder.decodeSlot(any(), any(), any(), any(), any()) } answers {
             val buffer = firstArg<ByteBuffer>()
             buffer.position(buffer.position() + 2)
             listOf(DecodedMetric(metric = Metric.MEAN, raw = 1000.0, value = 25.0, converted = true))

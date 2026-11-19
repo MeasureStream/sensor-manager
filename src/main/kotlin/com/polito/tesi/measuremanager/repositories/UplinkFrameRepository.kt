@@ -14,6 +14,14 @@ interface UplinkFrameRepository : JpaRepository<UplinkFrame, Long> {
     /** Gli ultimi frame di una CU, per la scheda diagnostica. */
     fun findTop50ByControlUnit_IdOrderByReceivedAtDesc(controlUnitId: Long): List<UplinkFrame>
 
+    /** L'ultimo report letto di una CU prima di un istante: serve a riconoscere i buchi. */
+    fun findTopByControlUnit_IdAndFportAndStatusInAndReceivedAtBeforeOrderByReceivedAtDesc(
+            controlUnitId: Long,
+            fport: Int,
+            statuses: Collection<FrameStatus>,
+            before: OffsetDateTime,
+    ): UplinkFrame?
+
     /** Quelli scartati e non ancora presi in carico: e' il numero che l'utente azzera. */
     fun countByControlUnit_IdAndStatusNotAndAcknowledgedAtIsNull(
             controlUnitId: Long,

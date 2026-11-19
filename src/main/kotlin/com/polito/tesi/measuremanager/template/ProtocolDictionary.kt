@@ -17,6 +17,12 @@ data class ProtocolDictionary(
         val metrics: List<MetricEntry> = emptyList(),
         /** Quale bit del byte CONTENT accende quale classe di metriche. */
         val contentClasses: List<ContentClass> = emptyList(),
+        /**
+         * I bit del byte CONTENT che non sono classi ma annunciano un campo in piu' nel report,
+         * come il byte di eta' (dizionario 1.2.3). Un dizionario che non li dichiara li fa
+         * semplicemente ignorare: e' il caso di ogni firmware che non li manda ancora.
+         */
+        val contentFlags: List<ContentFlag> = emptyList(),
         val fragmentation: Fragmentation = Fragmentation(),
         /** I sedici bit della parola di stato della CU (poll 0x0B). */
         val statusBits: List<StatusBit> = emptyList(),
@@ -52,6 +58,24 @@ data class ContentClass(
         val bit: Int = 0,
         @JsonProperty("class") val metricClass: String = "",
 )
+
+/**
+ * Un bit di CONTENT che annuncia un campo dopo FRAG. [name] `age` e' il byte di eta' della
+ * specifica (§ 8): l'eta' delle statistiche alla trasmissione, codificata come il Δt di
+ * allarmi ed eventi, presente solo nel frammento indicato da [fragment].
+ */
+data class ContentFlag(
+        val bit: Int = 0,
+        val name: String = "",
+        val bytes: Int = 1,
+        /** Il frammento che porta il campo; null = tutti. */
+        val fragment: Int? = 0,
+        val description: String? = null,
+) {
+    companion object {
+        const val AGE = "age"
+    }
+}
 
 /**
  * Regole del byte FRAG. Il protocollo non porta un identificatore di report, quindi la

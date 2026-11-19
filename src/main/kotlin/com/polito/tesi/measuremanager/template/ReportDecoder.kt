@@ -1,7 +1,10 @@
 package com.polito.tesi.measuremanager.template
 
+import com.polito.tesi.measuremanager.calibration.ResolvedCalibration
 import com.polito.tesi.measuremanager.entities.Metric
+import com.polito.tesi.measuremanager.quality.QualityFlags
 import java.nio.ByteBuffer
+import java.time.OffsetDateTime
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
@@ -15,6 +18,22 @@ data class DecodedMetric(
         val noNewData: Boolean = false,
         /** Tutti i byte dello slot a 0xFF: il sensore non ha risposto alla CU. */
         val notResponding: Boolean = false,
+        /** Incertezza del valore, per le metriche che si convertono con la taratura. */
+        val uncertainty: UncertaintyBudget? = null,
+        /** I flag che dipendono dalla metrica: CONVERTED, CAL_INSTANCE, CAL_EXPIRED, OUT_OF_CAL_RANGE. */
+        val flags: Int = 0,
+        /** La riga di `active_calibration` usata, se la conversione e' quella dell'esemplare. */
+        val calibrationId: Long? = null,
+)
+
+/**
+ * Cio' che la decodifica di uno slot deve sapere oltre ai byte: la taratura dell'esemplare in
+ * vigore, l'istante a cui riferirla e quanti campioni compongono le statistiche.
+ */
+data class SlotContext(
+        val calibration: ResolvedCalibration? = null,
+        val at: OffsetDateTime = OffsetDateTime.now(),
+        val samplesInWindow: Double? = null,
 )
 
 /** Il report non si puo' leggere: byte mancanti o metrica non descritta. */
@@ -32,6 +51,7 @@ class ReportTruncated(message: String) : Exception(message)
 class ReportDecoder(
         private val conversion: SensorConversion,
         private val protocol: ProtocolService,
+        private val uncertainty: UncertaintyEvaluator = UncertaintyEvaluator(),
 ) {
     private val logger = LoggerFactory.getLogger(ReportDecoder::class.java)
 
@@ -77,6 +97,7 @@ class ReportDecoder(
             template: SensorTemplate?,
             metrics: List<String>,
             slotLabel: String,
+            context: SlotContext = SlotContext(),
     ): List<DecodedMetric> {
         val raws = LinkedHashMap<String, Double>()
         val sizes = LinkedHashMap<String, Int>()
@@ -117,32 +138,84 @@ class ReportDecoder(
             return raws.map { (metric, raw) -> DecodedMetric(metric, raw, null, false, noNewData = true) }
         }
 
-        return raws.map { (metric, raw) -> convert(template, metric, raw, raws) }
+        return raws.map { (metric, raw) -> convert(template, metric, raw, raws, context) }
     }
 
-    /** Converte una metrica secondo il `transform` dichiarato dal template. */
+    /**
+     * Converte una metrica secondo il `transform` dichiarato dal template, con la funzione
+     * dell'esemplare se ce n'e' una in vigore, e ne stima l'incertezza.
+     */
     private fun convert(
             template: SensorTemplate?,
             metric: String,
             raw: Double,
             all: Map<String, Double>,
+            context: SlotContext,
     ): DecodedMetric {
         val transform = specOf(template, metric)?.transform ?: defaultTransform(metric)
+        val calibration = context.calibration
+        val instance = calibration?.function
 
         val result =
                 when (transform) {
-                    "calibration" -> conversion.toPhysical(template, raw)
+                    "calibration" -> conversion.toPhysical(template, raw, instance)
                     "variance" -> {
                         val mean = all[Metric.MEAN]
                         if (mean == null) ConvertedValue(raw, false)
-                        else conversion.varianceToPhysical(template, mean, raw)
+                        else conversion.varianceToPhysical(template, mean, raw, instance)
                     }
                     // L'integrale di una grandezza non lineare non ha una conversione esatta,
                     // e lo ZCR e' gia' una frequenza: restano come arrivano.
                     else -> ConvertedValue(raw, false)
                 }
 
-        return DecodedMetric(metric, raw, result.value, result.converted)
+        // La taratura dell'esemplare conta solo dove e' stata davvero usata: un integrale o
+        // uno ZCR restano grezzi, e dire che li ha convertiti un certificato sarebbe falso.
+        val usedInstance = instance != null && result.converted && transform in setOf("calibration", "variance")
+
+        var flags = 0
+        if (result.converted) flags = flags or QualityFlags.CONVERTED
+        if (usedInstance) {
+            flags = flags or QualityFlags.CAL_INSTANCE
+            if (calibration!!.expired) flags = flags or QualityFlags.CAL_EXPIRED
+            if (transform == "calibration" && calibration.outOfRange(result.value)) {
+                flags = flags or QualityFlags.OUT_OF_CAL_RANGE
+            }
+        }
+
+        val budget =
+                if (transform == "calibration" && result.converted && result.value != null) {
+                    uncertainty.evaluate(
+                            UncertaintyInput(
+                                    function =
+                                            when {
+                                                usedInstance -> instance
+                                                // Tarato a bordo: il grezzo e' gia' il fisico.
+                                                template?.outputFormat == "calibrated" -> null
+                                                else -> conversion.functionOf(template)
+                                            },
+                                    instance = usedInstance,
+                                    covariance = if (usedInstance) calibration!!.record.covariance else null,
+                                    raw = raw,
+                                    value = result.value,
+                                    spec = MetrologySpec.of(template?.metrology),
+                                    rawVariance = if (metric == Metric.MEAN) all[Metric.VARIANCE] else null,
+                                    samplesInWindow = context.samplesInWindow,
+                                    calibratedSince = if (usedInstance) calibration!!.record.validFrom else null,
+                                    at = context.at,
+                            )
+                    )
+                } else null
+
+        return DecodedMetric(
+                metric = metric,
+                raw = raw,
+                value = result.value,
+                converted = result.converted,
+                uncertainty = budget,
+                flags = flags,
+                calibrationId = if (usedInstance) calibration!!.record.id else null,
+        )
     }
 
     /** Se il template non dichiara `transform`, si deduce dal nome della metrica. */

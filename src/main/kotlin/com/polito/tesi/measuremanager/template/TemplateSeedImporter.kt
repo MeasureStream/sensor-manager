@@ -31,6 +31,8 @@ class TemplateSeedImporter(
                     "mu" to TemplateKind.MU,
                     "cu" to TemplateKind.CU,
                     "protocol" to TemplateKind.PROTOCOL,
+                    "procedures" to TemplateKind.PROCEDURE,
+                    "profiles" to TemplateKind.PROFILE,
             )
 
     @PostConstruct

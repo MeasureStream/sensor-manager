@@ -101,6 +101,7 @@ class ControlUnitServiceImpl(
         private val encoder: LorawanPayloadEncoder,
         private val planner: SensorConfigPlanner,
         private val serverEvents: ServerEventRecorder,
+        private val quality: com.polito.tesi.measuremanager.quality.ReportQualityService,
 ) : ControlUnitService {
 
     private val log = LoggerFactory.getLogger(ControlUnitServiceImpl::class.java)
@@ -1449,6 +1450,11 @@ class ControlUnitServiceImpl(
         var noNewData = 0
         var notResponding = 0
 
+        // La finestra di tempo e i flag che valgono per tutto il report. Senza byte di eta' —
+        // il caso di ogni firmware che non lo dichiara ancora in CONTENT — la finestra si chiude
+        // all'istante di ricezione e ogni campione porta NO_AGE.
+        val timing = quality.timing(c, timestamp, dto.ageRaw, readWithSnapshot = snapshot != null)
+
         /*
          * Ogni voce: lo slot da leggere e le metriche che porta. L'ordine e' quello del filo.
          *
@@ -1529,13 +1535,19 @@ class ControlUnitServiceImpl(
 
             val decoded =
                     try {
-                        reportDecoder.decodeSlot(buffer, template, metrics, slotLabel)
+                        reportDecoder.decodeSlot(
+                                buffer,
+                                template,
+                                metrics,
+                                slotLabel,
+                                quality.slotContext(sensor, timing),
+                        )
                     } catch (e: ReportTruncated) {
                         discardFrame(
                                 c,
                                 dto,
                                 expectedConfigVersion,
-                                e.message ?: "Report troncato",
+                                (e.message ?: "Report troncato") + quality.unknownContentHint(dto.content),
                                 frame,
                         )
                         return
@@ -1562,6 +1574,12 @@ class ControlUnitServiceImpl(
                                 converted = metric.converted,
                                 templateVersion = record?.version,
                                 uplinkFrame = frame,
+                                calibration = quality.calibrationRef(metric.calibrationId),
+                                uStd = metric.uncertainty?.uStd,
+                                uComponents = metric.uncertainty?.components,
+                                qualityFlags = timing.flags or metric.flags,
+                                windowStart = timing.windowStart,
+                                windowEnd = timing.windowEnd,
                         )
                 )
             }
@@ -1577,7 +1595,8 @@ class ControlUnitServiceImpl(
                     dto,
                     expectedConfigVersion,
                     "Il report ha ${buffer.remaining()} byte oltre le metriche attese: " +
-                            "la configurazione degli slot non corrisponde",
+                            "la configurazione degli slot non corrisponde" +
+                            quality.unknownContentHint(dto.content),
                     frame,
             )
             return
@@ -1597,6 +1616,8 @@ class ControlUnitServiceImpl(
                 }
 
         metricSampleRepository.saveAll(samples)
+        // Nella stessa transazione: se i campioni ci sono, c'e' anche l'evento da spedire.
+        quality.enqueueSampleConverted(c, frame, timing, samples)
         log.info(
                 "Misure salvate: {} metriche da {} slot{}{}{}",
                 samples.size,

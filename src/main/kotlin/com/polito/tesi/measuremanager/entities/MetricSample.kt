@@ -61,4 +61,20 @@ class MetricSample(
         @ManyToOne(fetch = FetchType.LAZY)
         @JoinColumn(name = "uplink_frame_id")
         var uplinkFrame: UplinkFrame? = null,
+        /** La taratura dell'esemplare usata per convertire; null = formula nominale del modello. */
+        @ManyToOne(fetch = FetchType.LAZY)
+        @JoinColumn(name = "calibration_id")
+        var calibration: ActiveCalibration? = null,
+        /** Incertezza tipo (k = 1); l'estesa si calcola alla lettura con k = 2. Null = non calcolata. */
+        @Column(name = "u_std") var uStd: Double? = null,
+        /** I contributi all'incertezza, per spiegare un valore. */
+        @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+        @Column(name = "u_components", columnDefinition = "jsonb")
+        var uComponents: Map<String, Double>? = null,
+        /** Bit di [com.polito.tesi.measuremanager.quality.QualityFlags]. Null sullo storico. */
+        @Column(name = "quality_flags") var qualityFlags: Int? = null,
+        /** La finestra di raccolta delle statistiche: inizio, se il periodo e' noto. */
+        @Column(name = "window_start") var windowStart: OffsetDateTime? = null,
+        /** La fine della finestra: ricezione meno l'eta', o la ricezione stessa con NO_AGE. */
+        @Column(name = "window_end") var windowEnd: OffsetDateTime? = null,
 )

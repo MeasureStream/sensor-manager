@@ -12,6 +12,10 @@ enum class TemplateKind {
     MU,
     CU,
     PROTOCOL,
+    /** Procedura di taratura (metodo): punti, stabilita', letture, regola decisionale. */
+    PROCEDURE,
+    /** Profilo d'uso di un punto di controllo: limiti, classe dello strumento, intervalli. */
+    PROFILE,
     ;
 
     companion object {

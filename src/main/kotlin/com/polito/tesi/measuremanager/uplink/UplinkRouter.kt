@@ -201,6 +201,7 @@ class UplinkRouter(
                             content = assembled.content,
                             fragments = assembled.fragments,
                             fport = FPort.REPORT,
+                            ageRaw = assembled.ageRaw,
                     )
             )
         }

@@ -20,7 +20,13 @@ data class MeasurementUnitDTO(
     // Torniamo solo l'ID della CU per evitare ricorsioni infinite nel JSON
     val controlUnitId: Long?,
     // Lista dei sensori collegati
-    val sensors: List<SensorDTO> = emptyList()
+    val sensors: List<SensorDTO> = emptyList(),
+    /**
+     * Il `sub` Keycloak del proprietario. Serve a metrology-service, che conosce il
+     * proprietario di ogni esemplare tarato senza leggere le tabelle di questo servizio; chi
+     * non e' amministratore lo vede solo sulle proprie MU, cioe' vede se stesso.
+     */
+    val ownerSub: String? = null,
 )
 
 /**
@@ -47,5 +53,6 @@ fun MeasurementUnit.toDTO(
     // sono marcati configurable = false.
     sensors = sensors.sortedBy { it.sensorIndex }.mapIndexed { i, s ->
         s.toDTO(templateService, configurable = sensorOffset + i < MAX_SENSORS_PER_CU)
-    }
+    },
+    ownerSub = user?.userId,
 )

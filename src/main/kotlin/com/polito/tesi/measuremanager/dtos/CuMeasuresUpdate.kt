@@ -26,4 +26,10 @@ data class CuMeasuresUpdate(
         val fragments: Int = 1,
         /** La porta da cui e' arrivato: 0x30, oppure 0x21 nel formato precedente. */
         val fport: Int = 0x30,
+        /**
+         * Il byte di eta' grezzo (codifica di `ElapsedTime`), se il report lo porta. Null con
+         * ogni firmware che non lo dichiara ancora in CONTENT: la finestra si chiude allora
+         * all'istante di ricezione e il campione prende il flag NO_AGE.
+         */
+        val ageRaw: Int? = null,
 )

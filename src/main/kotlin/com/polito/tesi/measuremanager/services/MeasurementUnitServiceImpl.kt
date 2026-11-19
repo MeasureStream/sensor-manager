@@ -41,9 +41,14 @@ class MeasurementUnitServiceImpl(
 ) : MeasurementUnitService {
 
     private val log = LoggerFactory.getLogger(MeasurementUnitServiceImpl::class.java)
+
+    // Le letture dell'anagrafica (get, getAll, getAllPage, summaries, events) le fa anche il
+    // personale del laboratorio (`app-staff`), che tara le MU dei clienti; le scritture
+    // (dissociate, delete) restano al proprietario e all'amministratore.
+
     override fun get(id: Long): MeasurementUnitDTO? {
         val mu =
-            if (ss.isAdmin()) {
+            if (ss.canReadAllUnits()) {
                 mur.findByIdOrNull(id)
             } else {
                 mur.findByIdAndUser_UserId(id, ss.getCurrentUserId())
@@ -59,7 +64,7 @@ class MeasurementUnitServiceImpl(
     ): List<MeasurementUnitDTO> {
         val units =
             when {
-                ss.isAdmin() -> extendedId?.let { mur.findAllByExtendedId(it) } ?: mur.findAll()
+                ss.canReadAllUnits() -> extendedId?.let { mur.findAllByExtendedId(it) } ?: mur.findAll()
                 else -> {
                     val userId = ss.getCurrentUserId()
                     extendedId?.let { mur.findAllByExtendedIdAndUser_UserId(it, userId) }
@@ -77,7 +82,7 @@ class MeasurementUnitServiceImpl(
         controlUnitDevEUI: Long?,
         controlUnitName: String?,
     ): Page<MeasurementUnitDTO> {
-        if (ss.isAdmin())
+        if (ss.canReadAllUnits())
             {
                 extendedId?.let {
                     return mur.findAllByExtendedId(it, page).map { e-> sensorMapper.toUnitDTO(e) }
@@ -106,7 +111,7 @@ class MeasurementUnitServiceImpl(
     override fun summaries(includeArchived: Boolean): List<MeasurementUnitSummaryDTO> {
         val units =
             when {
-                ss.isAdmin() -> if (includeArchived) mur.findAll() else mur.findAllByArchivedAtIsNull()
+                ss.canReadAllUnits() -> if (includeArchived) mur.findAll() else mur.findAllByArchivedAtIsNull()
                 includeArchived -> mur.findAllByUser_UserId(ss.getCurrentUserId())
                 else -> mur.findAllByUser_UserIdAndArchivedAtIsNull(ss.getCurrentUserId())
             }
@@ -129,7 +134,7 @@ class MeasurementUnitServiceImpl(
     }
 
     override fun events(id: Long): List<DeviceEventDTO> =
-        deviceEvents.findTop500ByMeasurementUnit_IdOrderByReceivedAtDesc(owned(id).id).map { it.toDTO() }
+        deviceEvents.findTop500ByMeasurementUnit_IdOrderByReceivedAtDesc(readable(id).id).map { it.toDTO() }
 
     @Transactional
     override fun dissociate(id: Long): MeasurementUnitSummaryDTO {
@@ -142,7 +147,12 @@ class MeasurementUnitServiceImpl(
         return mu.toSummaryDTO(protocol)
     }
 
-    /** La MU, se chi la chiede puo' vederla. */
+    /** La MU da leggere: dell'utente, o qualunque per l'amministratore e il personale. */
+    private fun readable(id: Long): MeasurementUnit =
+        (if (ss.canReadAllUnits()) mur.findByIdOrNull(id) else mur.findByIdAndUser_UserId(id, ss.getCurrentUserId()))
+            ?: throw EntityNotFoundException("Measurement Unit $id non trovata")
+
+    /** La MU da modificare: solo dell'utente, o qualunque per l'amministratore. */
     private fun owned(id: Long): MeasurementUnit =
         (if (ss.isAdmin()) mur.findByIdOrNull(id) else mur.findByIdAndUser_UserId(id, ss.getCurrentUserId()))
             ?: throw EntityNotFoundException("Measurement Unit $id non trovata")

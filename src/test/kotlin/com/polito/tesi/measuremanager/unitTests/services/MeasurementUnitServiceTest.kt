@@ -14,6 +14,7 @@ import com.polito.tesi.measuremanager.services.MeasurementUnitServiceImpl
 import com.polito.tesi.measuremanager.template.ProtocolService
 import com.polito.tesi.measuremanager.template.SensorMapper
 import com.polito.tesi.measuremanager.template.TemplateService
+import jakarta.persistence.EntityNotFoundException
 import java.time.OffsetDateTime
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -49,7 +50,7 @@ class MeasurementUnitServiceTest {
         val mu = MeasurementUnit().apply { id = muId; extendedId = 12345L }
         val dto = MeasurementUnitDTO(id = muId, extendedId = 12345L, localId = 1, model = 1, controlUnitId = null)
 
-        every { ss.isAdmin() } returns true
+        every { ss.canReadAllUnits() } returns true
         every { mur.findByIdOrNull(muId) } returns mu
         every { sensorMapper.toUnitDTO(mu) } returns dto
 
@@ -65,7 +66,7 @@ class MeasurementUnitServiceTest {
         val muId = 1L
         val userId = "user-789"
 
-        every { ss.isAdmin() } returns false
+        every { ss.canReadAllUnits() } returns false
         every { ss.getCurrentUserId() } returns userId
         every { mur.findByIdAndUser_UserId(muId, userId) } returns null
 
@@ -80,7 +81,7 @@ class MeasurementUnitServiceTest {
         val extId = 555L
         val muList = listOf(MeasurementUnit().apply { extendedId = extId })
 
-        every { ss.isAdmin() } returns true
+        every { ss.canReadAllUnits() } returns true
         every { mur.findAllByExtendedId(extId) } returns muList
         every { sensorMapper.toUnitDTO(any()) } returns mockk()
 
@@ -93,7 +94,7 @@ class MeasurementUnitServiceTest {
     @Test
     fun `getAll as user should only return owned units`() {
         val userId = "my-user"
-        every { ss.isAdmin() } returns false
+        every { ss.canReadAllUnits() } returns false
         every { ss.getCurrentUserId() } returns userId
         every { mur.findAllByUser_UserId(userId) } returns listOf()
 
@@ -154,7 +155,7 @@ class MeasurementUnitServiceTest {
                 lastSeen = OffsetDateTime.now().minusDays(2)
             }
 
-        every { ss.isAdmin() } returns true
+        every { ss.canReadAllUnits() } returns true
         every { mur.findAllByArchivedAtIsNull() } returns listOf(staccata)
         every { deviceEvents.countOpenByMeasurementUnit(listOf(1L)) } returns emptyList()
         every { alarms.countOpenByMeasurementUnit(listOf(1L)) } returns emptyList()
@@ -171,7 +172,7 @@ class MeasurementUnitServiceTest {
     fun `una MU senza nessun contatto non risulta in uso`() {
         val mu = MeasurementUnit().apply { id = 2; extendedId = 1L; controlUnit = ControlUnit() }
 
-        every { ss.isAdmin() } returns true
+        every { ss.canReadAllUnits() } returns true
         every { mur.findAllByArchivedAtIsNull() } returns listOf(mu)
         every { deviceEvents.countOpenByMeasurementUnit(listOf(2L)) } returns emptyList()
         every { alarms.countOpenByMeasurementUnit(listOf(2L)) } returns emptyList()
@@ -210,6 +211,44 @@ class MeasurementUnitServiceTest {
         }
 
         verify(exactly = 0) { mur.deleteById(any()) }
+    }
+
+    // --- TEST: il personale del laboratorio (app-staff) legge, non scrive ---
+
+    @Test
+    fun `il personale del laboratorio legge l'anagrafica di una MU di un cliente`() {
+        val extId = 0x10001L
+        every { ss.canReadAllUnits() } returns true
+        every { mur.findAllByExtendedId(extId) } returns listOf(MeasurementUnit().apply { extendedId = extId })
+        every { sensorMapper.toUnitDTO(any()) } returns mockk()
+
+        service.getAll(extendedId = extId, controlUnitDevEUI = null, controlUnitName = null)
+
+        verify { mur.findAllByExtendedId(extId) }
+        verify(exactly = 0) { mur.findAllByExtendedIdAndUser_UserId(any(), any()) }
+    }
+
+    @Test
+    fun `il personale del laboratorio legge gli eventi di una MU di un cliente`() {
+        val mu = MeasurementUnit().apply { id = 4; extendedId = 0x10001L }
+        every { ss.canReadAllUnits() } returns true
+        every { mur.findByIdOrNull(4L) } returns mu
+        every { deviceEvents.findTop500ByMeasurementUnit_IdOrderByReceivedAtDesc(4L) } returns emptyList()
+
+        assertTrue(service.events(4L).isEmpty())
+        verify(exactly = 0) { mur.findByIdAndUser_UserId(any(), any()) }
+    }
+
+    @Test
+    fun `il personale del laboratorio non dissocia una MU di un cliente`() {
+        // Dissociare e' una scrittura: conta solo l'amministratore, non canReadAllUnits.
+        every { ss.isAdmin() } returns false
+        every { ss.getCurrentUserId() } returns "tecnico"
+        every { mur.findByIdAndUser_UserId(3L, "tecnico") } returns null
+
+        assertThrows<EntityNotFoundException> { service.dissociate(3L) }
+
+        verify(exactly = 0) { mur.save(any()) }
     }
 
     // --- TEST: update (caso TODO) ---

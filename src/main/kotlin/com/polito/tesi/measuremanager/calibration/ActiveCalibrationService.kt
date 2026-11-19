@@ -34,6 +34,7 @@ data class ResolvedCalibration(
 @Service
 class ActiveCalibrationService(
         private val repository: ActiveCalibrationRepository,
+        private val reconversions: ReconversionService,
 ) {
     private val log = LoggerFactory.getLogger(ActiveCalibrationService::class.java)
 
@@ -110,8 +111,10 @@ class ActiveCalibrationService(
         // revoca) e' di nuovo in vigore.
         record.revokedAt = null
         record.receivedAt = OffsetDateTime.now()
-        repository.save(record)
+        val saved = repository.save(record)
         cache.remove(event.muExtendedId to event.sensorIndex)
+        // La conoscenza nuova vale anche all'indietro: riconversioni GAP e DRIFT, se servono.
+        reconversions.planAfterActivation(event, saved)
 
         log.info(
                 "Taratura attiva per {}: certificato {} rev. {} dal {}",

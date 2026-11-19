@@ -99,7 +99,8 @@ class InstanceCalibrationTest {
                 every { findByMuExtendedIdAndSensorIndexAndRevokedAtIsNull(any(), any()) } answers
                         { stored.filter { it.revokedAt == null } }
             }
-    private val service = ActiveCalibrationService(repository)
+    // Le riconversioni hanno il loro test (ReconversionTest): qui conta solo la risoluzione.
+    private val service = ActiveCalibrationService(repository, mockk(relaxed = true))
 
     private fun report(mean: Int, variance: Int): ByteBuffer =
             ByteBuffer.allocate(4).putShort(mean.toShort()).putShort(variance.toShort()).flip() as ByteBuffer

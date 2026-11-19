@@ -83,17 +83,21 @@ class UncertaintyEvaluator {
     private fun calibrationTerm(input: UncertaintyInput): Double? {
         val function = input.function
         val covariance = input.covariance
-        if (input.instance && function != null && covariance != null && covariance.size == function.coefficients.size) {
-            val g = runCatching { function.gradient(input.raw) }.getOrNull()
-            if (g != null) {
-                var variance = 0.0
-                for (i in g.indices) for (j in g.indices) variance += g[i] * covariance[i][j] * g[j]
-                if (variance >= 0 && variance.isFinite()) return sqrt(variance)
-            }
+        if (input.instance && function != null && covariance != null) {
+            instanceTerm(function, covariance, input.raw)?.let { return it }
         }
         // Senza covarianza dell'esemplare vale la tolleranza del modello: e' cio' che il
         // costruttore garantisce, e un certificato senza covarianza non dice di meglio.
         return input.spec.mpeAt(input.value)?.let { it / sqrt(3.0) }
+    }
+
+    /** `√(gᵀ·Σ·g)`: l'incertezza della funzione dell'esemplare per i soli coefficienti. */
+    fun instanceTerm(function: ConversionFunction, covariance: List<List<Double>>, raw: Double): Double? {
+        if (covariance.size != function.coefficients.size) return null
+        val g = runCatching { function.gradient(raw) }.getOrNull() ?: return null
+        var variance = 0.0
+        for (i in g.indices) for (j in g.indices) variance += g[i] * covariance[i][j] * g[j]
+        return if (variance >= 0 && variance.isFinite()) sqrt(variance) else null
     }
 
     companion object {

@@ -77,4 +77,11 @@ class MetricSample(
         @Column(name = "window_start") var windowStart: OffsetDateTime? = null,
         /** La fine della finestra: ricezione meno l'eta', o la ricezione stessa con NO_AGE. */
         @Column(name = "window_end") var windowEnd: OffsetDateTime? = null,
+        /** Il valore rivalutato da una riconversione (fase 5); [value] resta com'era. */
+        @Column(name = "corrected_value") var correctedValue: Double? = null,
+        /** Incertezza tipo (k = 1) del valore corretto. */
+        @Column(name = "corrected_u") var correctedU: Double? = null,
+        @Column(name = "corrected_calibration_id") var correctedCalibrationId: Long? = null,
+        @Column(name = "corrected_at") var correctedAt: OffsetDateTime? = null,
+        @Column(name = "corrected_run_id") var correctedRunId: Long? = null,
 )

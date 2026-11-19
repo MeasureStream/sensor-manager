@@ -29,6 +29,16 @@ data class CalibrationActivatedEvent(
         val calibratedRange: CalibratedRange? = null,
         val blockACrc: String? = null,
         val fingerprint: String? = null,
+        /**
+         * Quando e' stato misurato l'as-found da cui viene la funzione (fase 5): i campioni fra
+         * questo istante e [validFrom] si riconvertono con la funzione nuova (GAP).
+         */
+        val asFoundAt: OffsetDateTime? = null,
+        /**
+         * L'inizio del periodo da correggere per deriva, presente solo se l'as-found era fuori
+         * tolleranza: l'as-left precedente. Fra lui e [asFoundAt] la funzione si interpola (DRIFT).
+         */
+        val driftFrom: OffsetDateTime? = null,
 ) {
     fun key(): String = keyOf(muExtendedId, sensorIndex)
 

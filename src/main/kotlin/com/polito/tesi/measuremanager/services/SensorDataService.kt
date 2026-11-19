@@ -85,7 +85,7 @@ class SensorDataService(
         out.write(
                 "timestamp;window_start;window_end;metric;value;raw_value;converted;u_std;U_k2;" +
                         "quality_flags;flag_names;certificate_id;certificate_number;template_version;" +
-                        "mu_extended_id;sensor_index;model\n"
+                        "mu_extended_id;sensor_index;model;corrected_value;corrected_U_k2;corrected_calibration_id\n"
         )
         samples.findBySensor_IdAndTimestampBetweenOrderByTimestampAscMetricAsc(sensor.id, from, to).forEach { s ->
             val cells =
@@ -107,6 +107,9 @@ class SensorDataService(
                             mu.extendedId.toString(),
                             sensor.sensorIndex.toString(),
                             sensor.modelName,
+                            number(s.correctedValue),
+                            number(s.correctedU?.let { 2 * it }),
+                            s.correctedCalibrationId?.toString(),
                     )
             out.write(cells.joinToString(";") { it?.replace(";", ",") ?: "" })
             out.write("\n")

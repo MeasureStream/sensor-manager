@@ -21,7 +21,11 @@ import kotlin.test.assertNull
 class ReportAssemblerTest {
 
     private val protocol =
-            mockk<ProtocolService> { every { fragmentation() } returns Fragmentation() }
+            mockk<ProtocolService> {
+                every { fragmentation() } returns Fragmentation()
+                // Il dizionario di questi casi non dichiara il byte di eta': non si legge.
+                every { ageFlag() } returns null
+            }
 
     private val assembler = ReportAssembler(protocol)
 

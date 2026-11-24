@@ -41,6 +41,12 @@ dependencies {
     testImplementation("io.mockk:mockk:1.13.10")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("com.google.code.gson:gson:2.10.1")
+    // PostgreSQL vero senza Docker: le migrazioni Flyway e la validazione di Hibernate si
+    // provano anche dove Testcontainers non puo' girare.
+    testImplementation("io.zonky.test:embedded-postgres:2.2.2")
+    // embedded-postgres 2.2 chiede una commons-lang3 piu' recente di quella di Boot 3.3: solo nei test.
+    testImplementation("org.apache.commons:commons-lang3:3.18.0")
+    testImplementation(enforcedPlatform("io.zonky.test.postgres:embedded-postgres-binaries-bom:17.12.0"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

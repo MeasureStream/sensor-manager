@@ -13,6 +13,12 @@ data class ReportHeader(
         val content: Int?,
         val fragmentIndex: Int,
         val last: Boolean,
+        /**
+         * Il byte di eta' grezzo, se CONTENT lo annuncia e questo e' il frammento che lo porta.
+         * Null quando il firmware non lo manda: e' il caso di oggi, e il server lo gestisce
+         * con il flag NO_AGE invece di inventare un istante.
+         */
+        val ageRaw: Int? = null,
 )
 
 /** Un report intero, pronto da leggere. */
@@ -21,6 +27,8 @@ data class AssembledReport(
         val content: Int?,
         val data: ByteArray,
         val fragments: Int,
+        /** Il byte di eta' del frammento 0, se c'era. */
+        val ageRaw: Int? = null,
 )
 
 /** Un report lasciato a meta': i byte che c'erano e il motivo per cui non si completera'. */
@@ -74,6 +82,7 @@ class ReportAssembler(
             val chunks: MutableList<ByteArray>,
             var nextIndex: Int,
             val startedAt: Instant,
+            val ageRaw: Int? = null,
     ) {
         fun size() = chunks.sumOf { it.size }
 
@@ -90,17 +99,37 @@ class ReportAssembler(
 
         val buffer = ByteBuffer.wrap(bytes)
         val cfgVersion = buffer.get().toInt() and 0xFF
-        val content = Continuation.read8(buffer).toInt()
+        val content = Continuation.read8(buffer)
         if (buffer.remaining() < 1) throw ReportPayloadError("report 0x30: manca il byte FRAG")
         val frag = buffer.get().toInt() and 0xFF
 
         val rules = protocol.fragmentation()
+        val fragmentIndex = frag and rules.indexMask
+
+        // Il byte di eta' sta subito dopo FRAG, solo se CONTENT lo annuncia e solo nel
+        // frammento che il dizionario indica. Se il dizionario non dichiara il bit, non si
+        // legge niente: un firmware che non lo manda e' il caso normale, non un errore.
+        val age = protocol.ageFlag()
+        val ageRaw =
+                if (age != null &&
+                                (content.toInt() shr age.bit) and 1 == 1 &&
+                                (age.fragment == null || age.fragment == fragmentIndex)
+                ) {
+                    if (buffer.remaining() < age.bytes) {
+                        throw ReportPayloadError("report 0x30: CONTENT annuncia il byte di eta', ma il frammento finisce prima")
+                    }
+                    var value = 0
+                    repeat(age.bytes) { value = (value shl 8) or (buffer.get().toInt() and 0xFF) }
+                    value
+                } else null
+
         val header =
                 ReportHeader(
                         cfgVersion = cfgVersion,
-                        content = content,
-                        fragmentIndex = frag and rules.indexMask,
+                        content = content.toInt(),
+                        fragmentIndex = fragmentIndex,
                         last = (frag shr rules.lastBit) and 1 == 1,
+                        ageRaw = ageRaw,
                 )
 
         val data = ByteArray(buffer.remaining())
@@ -119,7 +148,7 @@ class ReportAssembler(
             val abandoned =
                     open.remove(devEui)?.let { abandon(devEui, it, "sostituito da un report nuovo") }
             return AssemblyResult(
-                    complete = AssembledReport(header.cfgVersion, header.content, data, 1),
+                    complete = AssembledReport(header.cfgVersion, header.content, data, 1, header.ageRaw),
                     abandoned = abandoned,
             )
         }
@@ -146,6 +175,7 @@ class ReportAssembler(
                             chunks = mutableListOf(),
                             nextIndex = 0,
                             startedAt = Instant.now(),
+                            ageRaw = header.ageRaw,
                     )
             open[devEui] = fresh
             current = fresh
@@ -206,6 +236,7 @@ class ReportAssembler(
                                 content = current.content,
                                 data = current.data(),
                                 fragments = current.chunks.size,
+                                ageRaw = current.ageRaw,
                         ),
                 abandoned = abandoned,
         )

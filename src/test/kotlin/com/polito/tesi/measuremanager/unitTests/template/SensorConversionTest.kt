@@ -3,6 +3,7 @@ package com.polito.tesi.measuremanager.unitTests.template
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.polito.tesi.measuremanager.template.ConversionFunction
 import com.polito.tesi.measuremanager.template.FormulaError
 import com.polito.tesi.measuremanager.template.FormulaEvaluator
 import com.polito.tesi.measuremanager.template.SensorConversion
@@ -118,6 +119,32 @@ class SensorConversionTest {
         val result = conversion.toPhysical(template("accelerometer_lsm6dsm.json"), 0.0)
         assertTrue(result.converted)
         assertClose(0.0, result.value, 1e-9, "accelerometro")
+    }
+
+    /**
+     * La funzione di un esemplare come la consegna il motore di taratura dal passo 3.5: un
+     * polinomio nella variabile centrata s = (x - centro) / semiampiezza, con centro e
+     * semiampiezza scritti come costanti (`calibration_engine.formula.centered_polynomial`).
+     * Su una gamma stretta lontana dallo zero la forma sulle potenze di x perde cifre in gᵀΣg;
+     * questa no, ed e' gia' valutabile senza toccare il server: lo si verifica qui.
+     */
+    @Test
+    fun `la funzione centrata del motore di taratura`() {
+        val s = "((x - 60150.0) / 150.0)"
+        val f = ConversionFunction("c[0] + c[1] * $s + c[2] * $s**2 + c[3] * $s**3", listOf(25.0, 10.0, -0.8, 0.3))
+        assertClose(34.5, f.evaluate(60300.0), 1e-12, "s = 1")
+        assertClose(13.9, f.evaluate(60000.0), 1e-12, "s = -1")
+
+        // Il gradiente rispetto ai coefficienti e' [1, s, s², s³]: la covarianza va in s.
+        val g = f.gradient(60225.0)
+        assertNotNull(g)
+        listOf(1.0, 0.5, 0.25, 0.125).zip(g).forEach { (expected, actual) ->
+            assertClose(expected, actual, 1e-6, "gradiente in s = 0.5")
+        }
+
+        // Le costanti come le scrive repr() di Python, anche in notazione esponenziale.
+        assertClose(2.0, FormulaEvaluator.evaluate("c[0] * ((x - 1.5e+3) / 2.5e-1)", 1500.5, listOf(1.0)), 1e-12, "esponenziale")
+        assertClose(2.0, FormulaEvaluator.evaluate("c[0] * ((x + 1500.0) / 0.25)", -1499.5, listOf(1.0)), 1e-12, "centro negativo")
     }
 
     @Test

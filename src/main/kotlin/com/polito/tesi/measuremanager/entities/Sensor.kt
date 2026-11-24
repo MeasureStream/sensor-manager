@@ -37,7 +37,9 @@ class Sensor(
         var isSensorActive: Boolean = false,
         var isStatisticActive: Boolean = false,
 
-        // SOLO se calibrati per singolo sensore reale
+        // Deprecati (PIANO_METROLOGIA 1.15): nessuno li legge per convertire. La taratura di un
+        // esemplare arriva da metrology-service in `active_calibration`, con la sua funzione e
+        // la sua covarianza. Restano solo per compatibilita' del DTO; si tolgono nella fase 7.
         var coeffA: Double? = null,
         var coeffB: Double? = null,
         var coeffC: Double? = null,

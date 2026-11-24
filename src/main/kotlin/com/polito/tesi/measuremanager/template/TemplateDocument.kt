@@ -75,6 +75,8 @@ object TemplateParser {
                         ?: throw TemplateRejected("templateVersion non e' nella forma major.minor.patch: $raw")
         val (major, minor, patch) = m.destructured
 
+        requiredFields(kind, node)
+
         @Suppress("UNCHECKED_CAST")
         val sorted = sortKeys(node, mapper) as Map<String, Any?>
         val normalized = mapper.writeValueAsString(sorted)
@@ -90,6 +92,55 @@ object TemplateParser {
                 contentMap = sorted,
                 contentHash = sha256(normalized),
         )
+    }
+
+    /**
+     * Procedure e profili non li legge il decoder ma il sistema qualita': un campo mancante
+     * non rompe una conversione, rompe una sessione di taratura o un esito di conformita'
+     * giorni dopo. Per questo il controllo minimo e' qui, alla pubblicazione (specifica § 4.5).
+     */
+    private fun requiredFields(kind: TemplateKind, node: JsonNode) {
+        fun require(condition: Boolean, what: String) {
+            if (!condition) throw TemplateRejected("${kind.name.lowercase()}: $what")
+        }
+        when (kind) {
+            TemplateKind.PROCEDURE -> {
+                require(node.get("quantity")?.isTextual == true, "quantity mancante")
+                val points = node.get("points")
+                require(points != null && points.isArray && points.size() > 0, "points deve essere un elenco non vuoto")
+                require(points!!.all { it.isNumber }, "points deve contenere solo numeri")
+                node.get("reference")?.let {
+                    require(it.get("templateId")?.isInt == true && it.get("major")?.isInt == true,
+                            "reference deve citare templateId e major")
+                }
+            }
+            TemplateKind.PROFILE -> {
+                require(node.get("quantity")?.isTextual == true, "quantity mancante")
+                // Limiti fissi (EN 12830) o limiti dal clima storico del punto di controllo (EN 15757).
+                val limits = node.get("limits")
+                val climate = node.get("historicClimate")
+                require((limits != null && limits.isObject) || (climate != null && climate.isObject),
+                        "serve limits oppure historicClimate")
+                if (limits != null && limits.isObject) {
+                    require(limits.has("high") || limits.has("low"), "limits deve dichiarare almeno high o low")
+                    if (limits.has("high") && limits.has("low")) {
+                        require(limits.get("low").asDouble() < limits.get("high").asDouble(), "limits.low deve stare sotto limits.high")
+                    }
+                }
+                if (climate != null && climate.isObject) {
+                    val days = climate.get("movingAverageDays")
+                    require(days != null && days.isInt && days.asInt() > 0, "historicClimate.movingAverageDays deve essere un intero positivo")
+                    val percentiles = climate.get("percentiles")
+                    require(percentiles != null && percentiles.isArray && percentiles.size() == 2 && percentiles.all { it.isNumber } &&
+                            percentiles[0].asDouble() > 0 && percentiles[0].asDouble() < percentiles[1].asDouble() && percentiles[1].asDouble() < 100,
+                            "historicClimate.percentiles deve essere [basso, alto] fra 0 e 100")
+                    val history = climate.get("minHistoryDays")
+                    require(history != null && history.isInt && history.asInt() >= days!!.asInt(),
+                            "historicClimate.minHistoryDays deve coprire almeno la media mobile")
+                }
+            }
+            else -> Unit
+        }
     }
 
     /**
